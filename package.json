@@ -1,0 +1,14 @@
+{
+  "name": "@akshaykarle/pi-tools",
+  "version": "0.1.0",
+  "description": "Pi coding agent extensions — security hardening, and more",
+  "keywords": ["pi-package"],
+  "pi": {
+    "extensions": ["./extensions"],
+    "skills": ["./skills"]
+  },
+  "peerDependencies": {
+    "@mariozechner/pi-coding-agent": ">=1.0.0"
+  },
+  "license": "MIT"
+}
