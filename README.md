@@ -5,14 +5,14 @@ Pi coding agent extensions for security hardening and productivity.
 ## Installation
 
 ```bash
-pi install npm:@akshaykarle/pi-tools
+pi install git:github.com/akshaykarle/pi-tools
 ```
 
 Or add to your `~/.pi/agent/settings.json`:
 
 ```json
 {
-  "packages": ["npm:@akshaykarle/pi-tools"]
+  "packages": ["git:github.com/akshaykarle/pi-tools"]
 }
 ```
 
