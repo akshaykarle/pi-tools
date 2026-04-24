@@ -364,9 +364,9 @@ export default function (pi: ExtensionAPI) {
 
   // --- Tool Result Interception ---
   pi.on("tool_result", async (event, ctx) => {
-    if (!event.result?.content) return;
+    if (!event.content) return;
 
-    for (const contentBlock of event.result.content) {
+    for (const contentBlock of event.content) {
       if (contentBlock.type !== "text" || !contentBlock.text) continue;
 
       // Section C: Redact secret values from output

@@ -10,5 +10,8 @@
   "peerDependencies": {
     "@mariozechner/pi-coding-agent": ">=0.66.1"
   },
+  "devDependencies": {
+    "typescript": "^6.0.3"
+  },
   "license": "MIT"
 }

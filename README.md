@@ -16,6 +16,11 @@ Or add to your `~/.pi/agent/settings.json`:
 }
 ```
 
+## Development
+
+Start a nix shell to install development dependencies `nix develop`.
+Then run `npm install && npx tsc`.
+
 ## Extensions
 
 ### security.ts
