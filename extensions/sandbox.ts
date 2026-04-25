@@ -363,7 +363,7 @@ export default function (pi: ExtensionAPI): void {
   });
 
   pi.registerCommand("sandbox", {
-    description: "Show sandbox configuration / validate / reload — try /sandbox status",
+    description: "Sandbox: status | show | validate | reload | off | on",
     handler: async (args, ctx) => {
       const sub = args.trim().split(/\s+/)[0] || "status";
       switch (sub) {
@@ -373,6 +373,68 @@ export default function (pi: ExtensionAPI): void {
         case "show":
           ctx.ui.notify(JSON.stringify(activeConfig, null, 2), "info");
           return;
+        case "off":
+          sandboxEnabled = false;
+          toolGuardEnabled = false;
+          ctx.ui.setStatus("sandbox", undefined);
+          ctx.ui.notify(
+            "Sandbox disabled at runtime — bash and tool guard now pass through. Use /sandbox on to re-enable.",
+            "warning",
+          );
+          return;
+        case "on": {
+          if (sandboxFailed) {
+            ctx.ui.notify(
+              "Cannot enable: sandbox init previously failed. Fix config and restart pi.",
+              "error",
+            );
+            return;
+          }
+          if (!sandboxInitialized) {
+            // Was disabled from the start (--no-sandbox or enabled:false).
+            // Re-load config and try to initialize now.
+            activeConfig = loadConfig(ctx.cwd);
+            toolGuardEnabled = true;
+            if (!SandboxManager.isSupportedPlatform()) {
+              ctx.ui.notify(
+                `OS sandbox not supported on ${process.platform}; tool guard enabled`,
+                "warning",
+              );
+              return;
+            }
+            try {
+              await SandboxManager.initialize(
+                toSrtRuntimeConfig(activeConfig),
+                buildAskCallback(ctx),
+              );
+              sandboxInitialized = true;
+              sandboxEnabled = true;
+              const dom = activeConfig.network?.allowedDomains?.length ?? 0;
+              const wr = activeConfig.filesystem?.allowWrite?.length ?? 0;
+              ctx.ui.setStatus(
+                "sandbox",
+                ctx.ui.theme.fg("accent", `🔒 Sandbox: ${dom} domains, ${wr} write paths`),
+              );
+              ctx.ui.notify("Sandbox enabled", "info");
+            } catch (err) {
+              sandboxFailed = true;
+              const msg = err instanceof Error ? err.message : String(err);
+              ctx.ui.notify(`Sandbox init failed: ${msg}`, "error");
+            }
+            return;
+          }
+          // Already initialized once — just flip the flags back on.
+          sandboxEnabled = true;
+          toolGuardEnabled = true;
+          const dom = activeConfig.network?.allowedDomains?.length ?? 0;
+          const wr = activeConfig.filesystem?.allowWrite?.length ?? 0;
+          ctx.ui.setStatus(
+            "sandbox",
+            ctx.ui.theme.fg("accent", `🔒 Sandbox: ${dom} domains, ${wr} write paths`),
+          );
+          ctx.ui.notify("Sandbox re-enabled", "info");
+          return;
+        }
         case "validate": {
           const paths = configPaths(ctx.cwd);
           const lines: string[] = ["Config validation:"];
@@ -411,7 +473,7 @@ export default function (pi: ExtensionAPI): void {
         }
         default:
           ctx.ui.notify(
-            `Unknown subcommand "${sub}". Try: status | show | validate | reload`,
+            `Unknown subcommand "${sub}". Try: status | show | validate | reload | off | on`,
             "warning",
           );
       }

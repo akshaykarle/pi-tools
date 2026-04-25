@@ -633,4 +633,130 @@ describe("/sandbox slash command", () => {
       "warning",
     );
   });
+
+  it("off: disables sandboxEnabled + toolGuardEnabled, clears status, and bash passes through", async () => {
+    vi.stubEnv("PI_CODING_AGENT_DIR", "/h/.pi-test");
+    const mock = setup();
+    await mock.invoke.sessionStart(makeCtx({ cwd: tmp }));
+
+    expect(__testing__.state().sandboxEnabled).toBe(true);
+    expect(__testing__.state().toolGuardEnabled).toBe(true);
+
+    const ctx = makeCtx({ cwd: tmp });
+    await mock.invoke.sandboxCommand("off", ctx);
+
+    const state = __testing__.state();
+    expect(state.sandboxEnabled).toBe(false);
+    expect(state.toolGuardEnabled).toBe(false);
+    expect(ctx.ui.setStatus).toHaveBeenCalledWith("sandbox", undefined);
+    expect(ctx.ui.notify).toHaveBeenCalledWith(
+      expect.stringMatching(/disabled at runtime/i),
+      "warning",
+    );
+
+    // Subsequent user_bash returns undefined (escape hatch).
+    const bashResult = await mock.invoke.userBash({}, makeCtx());
+    expect(bashResult).toBeUndefined();
+
+    // Subsequent tool_call read returns undefined (tool guard off).
+    const { homedir } = await import("node:os");
+    const readResult = await mock.invoke.toolCall(
+      { toolName: "read", input: { path: join(homedir(), ".ssh", "id_ed25519") } },
+      makeCtx({ cwd: tmp }),
+    );
+    expect(readResult).toBeUndefined();
+  });
+
+  it("on (after off, when sandbox was previously initialized): re-enables flags without re-init", async () => {
+    vi.stubEnv("PI_CODING_AGENT_DIR", "/h/.pi-test");
+    const mock = setup();
+    await mock.invoke.sessionStart(makeCtx({ cwd: tmp }));
+
+    expect(initializeMock).toHaveBeenCalledOnce();
+
+    await mock.invoke.sandboxCommand("off", makeCtx({ cwd: tmp }));
+    expect(__testing__.state().sandboxEnabled).toBe(false);
+
+    const ctx = makeCtx({ cwd: tmp });
+    await mock.invoke.sandboxCommand("on", ctx);
+
+    expect(__testing__.state().sandboxEnabled).toBe(true);
+    expect(__testing__.state().toolGuardEnabled).toBe(true);
+    // Did NOT re-call initialize — still 1 from session_start.
+    expect(initializeMock).toHaveBeenCalledOnce();
+    expect(ctx.ui.notify).toHaveBeenCalledWith(
+      expect.stringMatching(/re-enabled/i),
+      "info",
+    );
+  });
+
+  it("on (when sandbox was disabled from the start by --no-sandbox): runs initialize", async () => {
+    vi.stubEnv("PI_CODING_AGENT_DIR", "/h/.pi-test");
+    const mock = setup({ noSandbox: true });
+    await mock.invoke.sessionStart(makeCtx({ cwd: tmp }));
+
+    expect(initializeMock).not.toHaveBeenCalled();
+    expect(__testing__.state().sandboxInitialized).toBe(false);
+
+    const ctx = makeCtx({ cwd: tmp });
+    await mock.invoke.sandboxCommand("on", ctx);
+
+    expect(initializeMock).toHaveBeenCalledOnce();
+    expect(__testing__.state().sandboxInitialized).toBe(true);
+    expect(__testing__.state().sandboxEnabled).toBe(true);
+    expect(__testing__.state().toolGuardEnabled).toBe(true);
+    expect(ctx.ui.notify).toHaveBeenCalledWith(
+      expect.stringMatching(/^Sandbox enabled/i),
+      "info",
+    );
+  });
+
+  it("on (when sandbox previously failed to init): refuses with error, no re-init", async () => {
+    vi.stubEnv("PI_CODING_AGENT_DIR", "/h/.pi-test");
+    initializeMock.mockRejectedValueOnce(new Error("bwrap missing"));
+
+    const mock = setup();
+    await mock.invoke.sessionStart(makeCtx({ cwd: tmp }));
+    expect(__testing__.state().sandboxFailed).toBe(true);
+
+    const callsBefore = initializeMock.mock.calls.length;
+    const ctx = makeCtx({ cwd: tmp });
+    await mock.invoke.sandboxCommand("on", ctx);
+
+    expect(initializeMock.mock.calls.length).toBe(callsBefore);
+    expect(__testing__.state().sandboxEnabled).toBe(false);
+    expect(ctx.ui.notify).toHaveBeenCalledWith(
+      expect.stringMatching(/init previously failed/i),
+      "error",
+    );
+  });
+
+  it("on (when initialize throws on first try after off-from-start): marks sandboxFailed", async () => {
+    vi.stubEnv("PI_CODING_AGENT_DIR", "/h/.pi-test");
+    const mock = setup({ noSandbox: true });
+    await mock.invoke.sessionStart(makeCtx({ cwd: tmp }));
+
+    initializeMock.mockRejectedValueOnce(new Error("policy invalid"));
+
+    const ctx = makeCtx({ cwd: tmp });
+    await mock.invoke.sandboxCommand("on", ctx);
+
+    expect(__testing__.state().sandboxFailed).toBe(true);
+    expect(__testing__.state().sandboxEnabled).toBe(false);
+    expect(ctx.ui.notify).toHaveBeenCalledWith(
+      expect.stringMatching(/Sandbox init failed/i),
+      "error",
+    );
+  });
+
+  it("help text lists the new off/on subcommands", () => {
+    vi.stubEnv("PI_CODING_AGENT_DIR", "/h/.pi-test");
+    const mock = setup();
+
+    // registerCommand was called with the description string.
+    const call = (mock.api.registerCommand as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(call[0]).toBe("sandbox");
+    expect(call[1].description).toMatch(/off/);
+    expect(call[1].description).toMatch(/\bon\b/);
+  });
 });
