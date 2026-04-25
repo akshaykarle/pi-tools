@@ -1,4 +1,17 @@
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import { basename } from "node:path";
+import { type ExtensionAPI, getAgentDir } from "@mariozechner/pi-coding-agent";
+
+// Profile-aware agent dir name. PI_CODING_AGENT_DIR is set by the user's
+// fish aliases (~/.pi-personal, ~/.pi-sahaj, ~/.pi-client), so the basename
+// here is one of `.pi-personal`, `.pi-sahaj`, `.pi-client`. Fallback to
+// `.pi` when running pi outside the wrapper.
+function agentDirName(): string {
+  try {
+    return basename(getAgentDir()) || ".pi";
+  } catch {
+    return basename(process.env.PI_CODING_AGENT_DIR ?? "") || ".pi";
+  }
+}
 
 // ============================================================================
 // Section A: Hard-block patterns (no override, always blocked)
@@ -77,11 +90,14 @@ const EXFILTRATION_PATTERNS: Array<{ pattern: RegExp; description: string }> = [
   },
 ];
 
-const SELF_PROTECTION_PATHS = [
-  ".pi/agent/extensions/",
-  ".pi/agent/settings.json",
-  ".pi/agent/AGENTS.md",
-];
+function selfProtectionPaths(): string[] {
+  const dir = agentDirName();
+  return [
+    `${dir}/agent/extensions/`,
+    `${dir}/agent/settings.json`,
+    `${dir}/agent/AGENTS.md`,
+  ];
+}
 
 // ============================================================================
 // Section B: Confirmation-required patterns (user must approve)
@@ -299,7 +315,7 @@ export default function (pi: ExtensionAPI) {
       }
 
       // Section A: Hard blocks - self-protection (rm of extension files)
-      for (const protectedPath of SELF_PROTECTION_PATHS) {
+      for (const protectedPath of selfProtectionPaths()) {
         if (cmd.includes(protectedPath) && /\brm\b/.test(cmd)) {
           if (ctx.hasUI) {
             ctx.ui.notify(
@@ -343,7 +359,7 @@ export default function (pi: ExtensionAPI) {
     // Section A: Self-protection for write/edit tools
     if (event.toolName === "write" || event.toolName === "edit") {
       const path = (event.input.path as string) || "";
-      for (const protectedPath of SELF_PROTECTION_PATHS) {
+      for (const protectedPath of selfProtectionPaths()) {
         if (path.includes(protectedPath)) {
           if (ctx.hasUI) {
             ctx.ui.notify(
