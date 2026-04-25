@@ -1,0 +1,74 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`DEFAULT_CONFIG shape guard > frozen snapshot — alert on accidental edits 1`] = `
+{
+  "enabled": true,
+  "env": {
+    "strip": [
+      "ANTHROPIC_API_KEY",
+      "OPENAI_API_KEY",
+      "GITHUB_TOKEN",
+      "GH_TOKEN",
+      "AWS_SECRET_ACCESS_KEY",
+      "AWS_SESSION_TOKEN",
+      "AZURE_NPM_PASSWORD",
+      "AZURE_NPM_USERNAME",
+      "ACCERTIFY_NPM_TOKEN",
+      "NPM_TOKEN",
+      "DATABASE_URL",
+      "PRIVATE_KEY",
+      "SSH_PRIVATE_KEY",
+      "GOOGLE_API_KEY",
+      "SLACK_TOKEN",
+      "DISCORD_TOKEN",
+      "SENDGRID_API_KEY",
+      "STRIPE_SECRET_KEY",
+      "DOPPLER_TOKEN",
+      "VAULT_TOKEN",
+      "TAILSCALE_AUTH_KEY",
+    ],
+  },
+  "filesystem": {
+    "allowWrite": [
+      ".",
+      "/tmp",
+    ],
+    "denyRead": [
+      "~/.ssh",
+      "~/.aws",
+      "~/.gnupg",
+      "~/.npmrc",
+      "~/.netrc",
+    ],
+    "denyWrite": [
+      ".env",
+      ".env.*",
+      "*.pem",
+      "*.key",
+      "id_rsa",
+      "id_ed25519",
+      "*.pfx",
+    ],
+  },
+  "network": {
+    "allowedDomains": [
+      "api.anthropic.com",
+      "*.anthropic.com",
+      "api.openai.com",
+      "npmjs.org",
+      "*.npmjs.org",
+      "registry.npmjs.org",
+      "registry.yarnpkg.com",
+      "pypi.org",
+      "*.pypi.org",
+      "files.pythonhosted.org",
+      "github.com",
+      "*.github.com",
+      "api.github.com",
+      "raw.githubusercontent.com",
+      "objects.githubusercontent.com",
+    ],
+    "deniedDomains": [],
+  },
+}
+`;
