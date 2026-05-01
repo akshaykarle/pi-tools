@@ -22,8 +22,6 @@ export interface SandboxConfig {
 }
 
 export const DEFAULT_STRIP_VARS: string[] = [
-  "ANTHROPIC_API_KEY",
-  "OPENAI_API_KEY",
   "GITHUB_TOKEN",
   "GH_TOKEN",
   "AWS_SECRET_ACCESS_KEY",

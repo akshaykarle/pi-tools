@@ -147,8 +147,6 @@ const CONFIRMATION_PATTERNS: Array<{ pattern: RegExp; description: string }> = [
 // ============================================================================
 
 const SECRET_ENV_VAR_NAMES = [
-  "ANTHROPIC_API_KEY",
-  "OPENAI_API_KEY",
   "GITHUB_TOKEN",
   "GH_TOKEN",
   "GITLAB_TOKEN",

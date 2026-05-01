@@ -82,16 +82,16 @@ function setup(opts?: { noSandbox?: boolean }) {
 
 describe("session_start — env scrubbing", () => {
   it("deletes all DEFAULT_STRIP_VARS from process.env", async () => {
-    vi.stubEnv("ANTHROPIC_API_KEY", "sk-secret");
+    vi.stubEnv("GITHUB_TOKEN", "ghp-secret-1");
     vi.stubEnv("AWS_SECRET_ACCESS_KEY", "aws-secret");
-    vi.stubEnv("GH_TOKEN", "ghp-secret");
+    vi.stubEnv("GH_TOKEN", "ghp-secret-2");
     vi.stubEnv("UNRELATED_VAR", "keep-me");
     vi.stubEnv("PI_CODING_AGENT_DIR", "/h/.pi-test");
 
     const mock = setup();
     await mock.invoke.sessionStart(makeCtx({ cwd: tmp }));
 
-    expect(process.env.ANTHROPIC_API_KEY).toBeUndefined();
+    expect(process.env.GITHUB_TOKEN).toBeUndefined();
     expect(process.env.AWS_SECRET_ACCESS_KEY).toBeUndefined();
     expect(process.env.GH_TOKEN).toBeUndefined();
     expect(process.env.UNRELATED_VAR).toBe("keep-me");
@@ -113,34 +113,34 @@ describe("session_start — env scrubbing", () => {
   });
 
   it("env scrub fires BEFORE SandboxManager.initialize", async () => {
-    vi.stubEnv("ANTHROPIC_API_KEY", "sk-secret");
+    vi.stubEnv("GITHUB_TOKEN", "ghp-secret");
     vi.stubEnv("PI_CODING_AGENT_DIR", "/h/.pi-test");
 
     const order: string[] = [];
     initializeMock.mockImplementation(async () => {
-      order.push(`init:ANTHROPIC_API_KEY=${process.env.ANTHROPIC_API_KEY ?? ""}`);
+      order.push(`init:GITHUB_TOKEN=${process.env.GITHUB_TOKEN ?? ""}`);
     });
 
     const mock = setup();
     await mock.invoke.sessionStart(makeCtx({ cwd: tmp }));
 
     // initialize observed an empty value → scrub ran first.
-    expect(order).toEqual(["init:ANTHROPIC_API_KEY="]);
+    expect(order).toEqual(["init:GITHUB_TOKEN="]);
   });
 
   it("scrubs even when --no-sandbox is set", async () => {
-    vi.stubEnv("ANTHROPIC_API_KEY", "sk-secret");
+    vi.stubEnv("GITHUB_TOKEN", "ghp-secret");
     vi.stubEnv("PI_CODING_AGENT_DIR", "/h/.pi-test");
 
     const mock = setup({ noSandbox: true });
     await mock.invoke.sessionStart(makeCtx({ cwd: tmp }));
 
-    expect(process.env.ANTHROPIC_API_KEY).toBeUndefined();
+    expect(process.env.GITHUB_TOKEN).toBeUndefined();
     expect(initializeMock).not.toHaveBeenCalled();
   });
 
   it("scrubs even when config sets enabled:false", async () => {
-    vi.stubEnv("ANTHROPIC_API_KEY", "sk-secret");
+    vi.stubEnv("GITHUB_TOKEN", "ghp-secret");
     vi.stubEnv("PI_CODING_AGENT_DIR", "/h/.pi-test");
 
     mkdirSync(join(tmp, ".pi-test"));
@@ -152,7 +152,7 @@ describe("session_start — env scrubbing", () => {
     const mock = setup();
     await mock.invoke.sessionStart(makeCtx({ cwd: tmp }));
 
-    expect(process.env.ANTHROPIC_API_KEY).toBeUndefined();
+    expect(process.env.GITHUB_TOKEN).toBeUndefined();
     expect(initializeMock).not.toHaveBeenCalled();
   });
 });

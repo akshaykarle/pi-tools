@@ -142,8 +142,8 @@ describe("effectiveStripList — always includes DEFAULT_STRIP_VARS", () => {
   });
 
   it("dedupes when config.env.strip overlaps defaults", () => {
-    const list = effectiveStripList({ env: { strip: ["ANTHROPIC_API_KEY"] } });
-    const count = list.filter((v) => v === "ANTHROPIC_API_KEY").length;
+    const list = effectiveStripList({ env: { strip: ["GITHUB_TOKEN"] } });
+    const count = list.filter((v) => v === "GITHUB_TOKEN").length;
     expect(count).toBe(1);
   });
 });
