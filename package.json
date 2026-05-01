@@ -11,7 +11,10 @@
   "pi": {
     "extensions": [
       "./extensions/security.ts",
-      "./extensions/sandbox.ts"
+      "./extensions/sandbox.ts",
+      "./extensions/agent-teams.ts",
+      "./extensions/git-worktree.ts",
+      "node_modules/@plannotator/pi-extension"
     ],
     "skills": [
       "./skills",
@@ -19,8 +22,10 @@
     ]
   },
   "scripts": {
+    "build": "tsc",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "prepublishOnly": "npm run build && npm test"
   },
   "peerDependencies": {
     "@mariozechner/pi-coding-agent": ">=0.66.1"
@@ -30,9 +35,17 @@
     "@plannotator/pi-extension": "^0.19.5"
   },
   "devDependencies": {
+    "@types/node": "^22.0.0",
     "typescript": "^6.0.3",
-    "vitest": "^4.1.5",
-    "@types/node": "^22.0.0"
+    "vitest": "^4.1.5"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "files": [
+    "dist/",
+    "extensions/",
+    "skills/"
+  ],
+  "publishConfig": {
+    "access": "public"
+  }
 }
