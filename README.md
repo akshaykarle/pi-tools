@@ -18,8 +18,9 @@ Or add to your `~/.pi/agent/settings.json`:
 
 ## Development
 
-Start a nix shell to install development dependencies `nix develop`.
-Then run `npm install && npx tsc`.
+This repo uses [nix-direnv](https://github.com/nix-community/nix-direnv). Once installed, run `direnv allow` once — deps from `flake.nix` auto-load on `cd`.
+
+Without direnv: `nix develop` then `npm install && npx tsc`.
 
 ## Extensions
 
