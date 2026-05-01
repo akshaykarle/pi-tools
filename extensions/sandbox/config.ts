@@ -1,5 +1,5 @@
 import { existsSync, readFileSync } from "node:fs";
-import { basename, join } from "node:path";
+import { join } from "node:path";
 import { getAgentDir } from "@mariozechner/pi-coding-agent";
 import type { SandboxRuntimeConfig } from "@anthropic-ai/sandbox-runtime";
 
@@ -89,10 +89,9 @@ export interface ConfigPaths {
 }
 
 export function configPaths(cwd: string): ConfigPaths {
-  const profileDir = basename(process.env.PI_CODING_AGENT_DIR ?? "") || ".pi";
   return {
     userPath: join(getAgentDir(), "sandbox.json"),
-    projectPath: join(cwd, profileDir, "sandbox.json"),
+    projectPath: join(cwd, ".pi", "sandbox.json"),
   };
 }
 

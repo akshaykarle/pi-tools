@@ -101,9 +101,9 @@ describe("session_start — env scrubbing", () => {
     vi.stubEnv("CUSTOM_PROJECT_SECRET", "x");
     vi.stubEnv("PI_CODING_AGENT_DIR", "/h/.pi-test");
 
-    mkdirSync(join(tmp, ".pi-test"));
+    mkdirSync(join(tmp, ".pi"));
     writeFileSync(
-      join(tmp, ".pi-test", "sandbox.json"),
+      join(tmp, ".pi", "sandbox.json"),
       JSON.stringify({ env: { strip: ["CUSTOM_PROJECT_SECRET"] } }),
     );
 
@@ -143,9 +143,9 @@ describe("session_start — env scrubbing", () => {
     vi.stubEnv("GITHUB_TOKEN", "ghp-secret");
     vi.stubEnv("PI_CODING_AGENT_DIR", "/h/.pi-test");
 
-    mkdirSync(join(tmp, ".pi-test"));
+    mkdirSync(join(tmp, ".pi"));
     writeFileSync(
-      join(tmp, ".pi-test", "sandbox.json"),
+      join(tmp, ".pi", "sandbox.json"),
       JSON.stringify({ enabled: false }),
     );
 
@@ -193,8 +193,8 @@ describe("session_start — initialization paths", () => {
 
   it("config enabled:false: skip initialize, tool guard off", async () => {
     vi.stubEnv("PI_CODING_AGENT_DIR", "/h/.pi-test");
-    mkdirSync(join(tmp, ".pi-test"));
-    writeFileSync(join(tmp, ".pi-test", "sandbox.json"), JSON.stringify({ enabled: false }));
+    mkdirSync(join(tmp, ".pi"));
+    writeFileSync(join(tmp, ".pi", "sandbox.json"), JSON.stringify({ enabled: false }));
 
     const mock = setup();
     await mock.invoke.sessionStart(makeCtx({ cwd: tmp }));
@@ -457,7 +457,7 @@ describe("tool_call — write guard", () => {
       ctx,
     );
 
-    const projectFile = join(tmp, ".pi-test", "sandbox.json");
+    const projectFile = join(tmp, ".pi", "sandbox.json");
     const parsed = JSON.parse(readFileSync(projectFile, "utf-8"));
     expect(parsed.filesystem.allowWrite).toContain("/private/area/file.txt");
     expect(updateConfigMock).toHaveBeenCalled();
@@ -584,8 +584,8 @@ describe("/sandbox slash command", () => {
   it("validate reports OK / INVALID per layer", async () => {
     vi.stubEnv("PI_CODING_AGENT_DIR", "/h/.pi-test");
     writeFileSync(join(tmp, "sandbox.json"), "{ broken json");
-    mkdirSync(join(tmp, ".pi-test"));
-    writeFileSync(join(tmp, ".pi-test", "sandbox.json"), JSON.stringify({ enabled: true }));
+    mkdirSync(join(tmp, ".pi"));
+    writeFileSync(join(tmp, ".pi", "sandbox.json"), JSON.stringify({ enabled: true }));
 
     const mock = setup();
     await mock.invoke.sessionStart(makeCtx({ cwd: tmp }));
@@ -605,9 +605,9 @@ describe("/sandbox slash command", () => {
     await mock.invoke.sessionStart(makeCtx({ cwd: tmp }));
 
     // Now write a project config and reload.
-    mkdirSync(join(tmp, ".pi-test"));
+    mkdirSync(join(tmp, ".pi"));
     writeFileSync(
-      join(tmp, ".pi-test", "sandbox.json"),
+      join(tmp, ".pi", "sandbox.json"),
       JSON.stringify({
         network: { allowedDomains: ["after-reload.com"], deniedDomains: [] },
       }),

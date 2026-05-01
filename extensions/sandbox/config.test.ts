@@ -37,22 +37,16 @@ function writeJson(path: string, obj: unknown): void {
 }
 
 describe("configPaths — profile resolution", () => {
-  it("derives project path from PI_CODING_AGENT_DIR basename", () => {
+  it("always uses .pi as the project config directory regardless of PI_CODING_AGENT_DIR", () => {
     vi.stubEnv("PI_CODING_AGENT_DIR", "/home/x/.pi-sahaj");
-    const { projectPath } = configPaths("/work");
-    expect(projectPath).toBe("/work/.pi-sahaj/sandbox.json");
-  });
-
-  it("falls back to .pi when PI_CODING_AGENT_DIR is unset", () => {
-    vi.stubEnv("PI_CODING_AGENT_DIR", "");
     const { projectPath } = configPaths("/work");
     expect(projectPath).toBe("/work/.pi/sandbox.json");
   });
 
-  it("uses basename for non-standard PI_CODING_AGENT_DIR values", () => {
-    vi.stubEnv("PI_CODING_AGENT_DIR", "/weird/path");
+  it("uses .pi when PI_CODING_AGENT_DIR is unset", () => {
+    vi.stubEnv("PI_CODING_AGENT_DIR", "");
     const { projectPath } = configPaths("/work");
-    expect(projectPath).toBe("/work/path/sandbox.json");
+    expect(projectPath).toBe("/work/.pi/sandbox.json");
   });
 
   it("userPath is getAgentDir() + /sandbox.json", () => {
@@ -171,8 +165,8 @@ describe("loadConfig — layered merge behaviour", () => {
     writeJson(join(tmp, "sandbox.json"), {
       network: { allowedDomains: ["user-only.com"], deniedDomains: [] },
     });
-    mkdirSync(join(tmp, ".pi-test"));
-    writeJson(join(tmp, ".pi-test", "sandbox.json"), {
+    mkdirSync(join(tmp, ".pi"));
+    writeJson(join(tmp, ".pi", "sandbox.json"), {
       network: { allowedDomains: ["project-only.com"], deniedDomains: [] },
     });
     const loaded = loadConfig(tmp);
@@ -196,8 +190,8 @@ describe("loadConfig — layered merge behaviour", () => {
     writeJson(join(tmp, "sandbox.json"), {
       network: { allowedDomains: ["user.com"], deniedDomains: [] },
     });
-    mkdirSync(join(tmp, ".pi-test"));
-    writeFileSync(join(tmp, ".pi-test", "sandbox.json"), "not json");
+    mkdirSync(join(tmp, ".pi"));
+    writeFileSync(join(tmp, ".pi", "sandbox.json"), "not json");
     const loaded = loadConfig(tmp);
     expect(loaded.network?.allowedDomains).toEqual(["user.com"]);
     spy.mockRestore();
@@ -206,8 +200,8 @@ describe("loadConfig — layered merge behaviour", () => {
   it("env.strip unions across all three layers", () => {
     vi.stubEnv("PI_CODING_AGENT_DIR", "/fake/.pi-test");
     writeJson(join(tmp, "sandbox.json"), { env: { strip: ["USER_SECRET"] } });
-    mkdirSync(join(tmp, ".pi-test"));
-    writeJson(join(tmp, ".pi-test", "sandbox.json"), {
+    mkdirSync(join(tmp, ".pi"));
+    writeJson(join(tmp, ".pi", "sandbox.json"), {
       env: { strip: ["PROJECT_SECRET"] },
     });
     const loaded = loadConfig(tmp);
