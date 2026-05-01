@@ -2,13 +2,21 @@
   "name": "@akshaykarle/pi-tools",
   "version": "0.1.0",
   "description": "Pi coding agent extensions — security hardening, and more",
-  "keywords": ["pi-package"],
+  "keywords": [
+    "pi-package"
+  ],
+  "bundledDependencies": [
+    "@plannotator/pi-extension"
+  ],
   "pi": {
     "extensions": [
       "./extensions/security.ts",
       "./extensions/sandbox.ts"
     ],
-    "skills": ["./skills"]
+    "skills": [
+      "./skills",
+      "node_modules/@plannotator/pi-extension/skills"
+    ]
   },
   "scripts": {
     "test": "vitest run",
@@ -18,7 +26,8 @@
     "@mariozechner/pi-coding-agent": ">=0.66.1"
   },
   "dependencies": {
-    "@anthropic-ai/sandbox-runtime": "^0.0.49"
+    "@anthropic-ai/sandbox-runtime": "^0.0.49",
+    "@plannotator/pi-extension": "^0.19.5"
   },
   "devDependencies": {
     "typescript": "^6.0.3",

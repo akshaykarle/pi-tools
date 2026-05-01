@@ -50,6 +50,10 @@ Defense-in-depth security extension that intercepts tool calls and results:
 - Catches markdown image/link exfiltration patterns
 - Warns (doesn't block) to avoid false positives on legitimate files
 
+### plannotator
+
+Bundled from [@plannotator/pi-extension](https://github.com/backnotprop/plannotator). Interactive plan review for coding agents — annotate plans visually, share with your team, and automatically send feedback.
+
 ## License
 
 MIT
