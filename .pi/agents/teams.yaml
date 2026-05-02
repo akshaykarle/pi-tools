@@ -1,0 +1,27 @@
+# Agent Teams configuration
+# Each team defines its members, workspace isolation mode, and concurrency limits.
+
+default-team:
+  description: "Full-stack development team with research, implementation, and review"
+  workspaceMode: shared
+  maxConcurrency: 2
+  members:
+    - researcher
+    - implementer
+    - reviewer
+
+research-team:
+  description: "Research-only team for codebase exploration and analysis"
+  workspaceMode: shared
+  maxConcurrency: 3
+  members:
+    - researcher
+
+dev-worktree:
+  description: "Development team with git worktree isolation per agent"
+  workspaceMode: worktree
+  maxConcurrency: 2
+  members:
+    - researcher
+    - implementer
+    - reviewer

@@ -1,0 +1,12 @@
+{
+  "packages": [
+    {
+      "source": "git:github.com/akshaykarle/pi-tools",
+      "extensions": [],
+      "skills": [],
+      "prompts": [],
+      "themes": []
+    },
+    ".."
+  ]
+}
