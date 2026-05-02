@@ -4,3 +4,5 @@ dist/
 *.d.ts
 *.js.map
 .direnv/
+.pi/agent-teams
+PLAN.md
