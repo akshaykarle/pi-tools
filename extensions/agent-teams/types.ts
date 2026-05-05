@@ -48,6 +48,12 @@ export interface AgentDefinition {
    *   Only the listed extensions load.
    */
   extensions?: string[];
+  /**
+   * When `true`, passes `--plan` to the child process, starting the session in
+   * plannotator's planning phase. Plannotator must be available (either via
+   * unrestricted extensions or explicitly listed in the `extensions` field).
+   */
+  plan?: boolean;
   /** System prompt injected into the child pi session. Taken from the markdown body. */
   systemPrompt: string;
   /** Absolute path to the source `.md` file. */

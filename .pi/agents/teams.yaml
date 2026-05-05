@@ -25,3 +25,10 @@ dev-worktree:
     - researcher
     - implementer
     - reviewer
+
+nano-team:
+  description: "Reliability experiment — smaller models with guided planning via plannotator"
+  workspaceMode: worktree
+  maxConcurrency: 1
+  members:
+    - nano-worker

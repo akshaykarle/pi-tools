@@ -99,6 +99,11 @@ export function buildAgentArgs(opts: Omit<SpawnAgentOptions, "onProgress" | "sig
     args.push("--model", model);
   }
 
+  // Start in plannotator planning phase if requested.
+  if (agent.plan === true) {
+    args.push("--plan");
+  }
+
   // Compute and set tool whitelist.
   const toolsList = resolveToolsList(agent, allToolNames ?? []);
   if (toolsList) {

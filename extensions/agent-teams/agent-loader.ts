@@ -14,6 +14,7 @@ interface AgentFrontmatter {
   model?: string;
   skills?: string;
   extensions?: string;
+  plan?: string | boolean;
 }
 
 /**
@@ -64,6 +65,11 @@ export function parseAgentFile(filePath: string): AgentDefinition | null {
       ? undefined                            // absent — all extensions load
       : (parseToolList(rawExtensions) ?? []); // empty string → [], list → array
 
+  // `plan` is true when the frontmatter value is the string 'true' or boolean true.
+  const rawPlan = frontmatter.plan as string | boolean | undefined;
+  const plan: boolean | undefined =
+    rawPlan === true || rawPlan === "true" ? true : undefined;
+
   return {
     name: frontmatter.name,
     description: frontmatter.description ?? "",
@@ -72,6 +78,7 @@ export function parseAgentFile(filePath: string): AgentDefinition | null {
     model: frontmatter.model as string | undefined,
     skills,
     extensions,
+    plan,
     systemPrompt: body.trim(),
     filePath,
   };

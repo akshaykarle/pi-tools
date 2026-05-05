@@ -174,6 +174,37 @@ Body.
   it("returns null for non-existent file", () => {
     expect(parseAgentFile(join(tmpDir, "nope.md"))).toBeNull();
   });
+
+  it("parses plan: true as boolean true", () => {
+    const filePath = join(tmpDir, "planner-agent.md");
+    writeFileSync(
+      filePath,
+      `---
+name: planner-agent
+plan: true
+---
+You are a planning specialist.
+`,
+    );
+    const def = parseAgentFile(filePath);
+    expect(def).not.toBeNull();
+    expect(def!.plan).toBe(true);
+  });
+
+  it("leaves plan undefined when absent from frontmatter", () => {
+    const filePath = join(tmpDir, "no-plan-agent.md");
+    writeFileSync(
+      filePath,
+      `---
+name: no-plan-agent
+---
+Just an ordinary agent.
+`,
+    );
+    const def = parseAgentFile(filePath);
+    expect(def).not.toBeNull();
+    expect(def!.plan).toBeUndefined();
+  });
 });
 
 describe("loadAgentDefinitions", () => {

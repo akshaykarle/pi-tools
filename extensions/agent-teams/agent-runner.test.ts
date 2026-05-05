@@ -248,6 +248,28 @@ describe("buildAgentArgs", () => {
     });
   });
 
+  describe("plan flag", () => {
+    it("includes --plan when agent.plan is true", () => {
+      const args = buildAgentArgs({
+        agent: makeAgent({ plan: true }),
+        task: "do something",
+        workspace,
+        cwd: tmpDir,
+      });
+      expect(args).toContain("--plan");
+    });
+
+    it("omits --plan when plan is absent from the agent definition", () => {
+      const args = buildAgentArgs({
+        agent: makeAgent(),
+        task: "do something",
+        workspace,
+        cwd: tmpDir,
+      });
+      expect(args).not.toContain("--plan");
+    });
+  });
+
   describe("session resume", () => {
     it("includes -c when session file exists", () => {
       writeFileSync(workspace.sessionFile, "{}", "utf-8");

@@ -246,6 +246,20 @@ async function dispatchAgentForTask(
     extensionArgs = resolvedArgs;
   }
 
+  // Guard: --plan requires plannotator to be loaded. If extensions are
+  // restricted and plannotator is not in the list, fail before spawning.
+  if (agentDef.plan === true && agentDef.extensions !== undefined) {
+    const hasPlanner = agentDef.extensions.some(
+      (e) => e.toLowerCase() === "plannotator" || e.toLowerCase() === "pi-extension"
+    );
+    if (!hasPlanner) {
+      throw new Error(
+        `Agent "${agentName}" has plan: true but plannotator is not in its extensions list. ` +
+        `Add 'plannotator' to the extensions field or leave extensions unset.`
+      );
+    }
+  }
+
   // Spawn the agent.
   runningCount++;
   try {
