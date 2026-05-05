@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   createWorktree,
   findGitRoot,
+  findWorktreeByName,
   isCleanWorkingTree,
   linkNodeModules,
   listWorktrees,
@@ -127,5 +128,45 @@ describe("linkNodeModules", () => {
     const targetDir = mkdtempSync(join(tmpdir(), "link-test-"));
     expect(linkNodeModules(repoDir, targetDir)).toBe(false);
     rmSync(targetDir, { recursive: true, force: true });
+  });
+});
+
+describe("findWorktreeByName", () => {
+  it("returns undefined when the named worktree does not exist", () => {
+    const found = findWorktreeByName(repoDir, "nonexistent");
+    expect(found).toBeUndefined();
+  });
+
+  it("returns the worktree when found by exact name", () => {
+    createWorktree(repoDir, "my-feature");
+    const found = findWorktreeByName(repoDir, "my-feature");
+    expect(found).toBeDefined();
+    expect(found!.branch).toBe("agent-teams/my-feature");
+  });
+
+  it("returns undefined for a non-existent name even when worktrees exist", () => {
+    createWorktree(repoDir, "existing");
+    const found = findWorktreeByName(repoDir, "not-existing");
+    expect(found).toBeUndefined();
+  });
+
+  it("handles names with spaces and capitals (sanitized to match directory)", () => {
+    createWorktree(repoDir, "My Feature");
+    // "My Feature" sanitizes to "my-feature"
+    const found = findWorktreeByName(repoDir, "My Feature");
+    expect(found).toBeDefined();
+    const found2 = findWorktreeByName(repoDir, "my-feature");
+    expect(found2).toBeDefined();
+    expect(found!.path).toBe(found2!.path);
+  });
+
+  it("finds the correct worktree among multiple worktrees", () => {
+    createWorktree(repoDir, "alpha");
+    createWorktree(repoDir, "beta");
+    const found = findWorktreeByName(repoDir, "beta");
+    expect(found).toBeDefined();
+    expect(found!.branch).toBe("agent-teams/beta");
+    const notFound = findWorktreeByName(repoDir, "gamma");
+    expect(notFound).toBeUndefined();
   });
 });

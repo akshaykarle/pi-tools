@@ -4,7 +4,7 @@
 
 import { execFileSync } from "node:child_process";
 import { existsSync, symlinkSync, statSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { basename, join, resolve } from "node:path";
 
 export interface WorktreeInfo {
   /** Absolute path to the worktree. */
@@ -207,4 +207,29 @@ export function linkNodeModules(
 export function isCleanWorkingTree(repoRoot: string): boolean {
   const status = git(repoRoot, ["status", "--porcelain"]);
   return status.trim() === "";
+}
+
+/**
+ * Find a worktree by its short name (the directory name portion of its path).
+ *
+ * The name is sanitized the same way as in createWorktree, so passing the same
+ * name used to create the worktree will always find it.
+ *
+ * @param repoRoot - Absolute path to the repository root.
+ * @param name     - The human-friendly name (same value passed to createWorktree).
+ * @returns The matching WorktreeInfo, or undefined if not found.
+ */
+export function findWorktreeByName(
+  repoRoot: string,
+  name: string,
+): WorktreeInfo | undefined {
+  const sanitized =
+    name
+      .toLowerCase()
+      .replace(/[^a-z0-9._/-]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 48) || "branch";
+
+  const worktrees = listWorktrees(repoRoot);
+  return worktrees.find((wt) => basename(wt.path) === sanitized);
 }
