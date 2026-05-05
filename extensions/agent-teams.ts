@@ -21,7 +21,7 @@ import { createAgentWorkspace } from "./agent-teams/workspace.js";
 import { addTask, addTasks, getTask, listTasks, updateTask } from "./agent-teams/task-board.js";
 import { appendHandoff, loadHandoffs } from "./agent-teams/handoff-log.js";
 import { spawnAgent, resolveToolsList } from "./agent-teams/agent-runner.js";
-import { resolveSkills } from "./agent-teams/skill-loader.js";
+import { findSkillDir, readPiSkillDirs, readPiExtensionPaths } from "./agent-teams/skill-loader.js";
 import { detectIncompleteRuns, formatIncompleteRunsSummary } from "./agent-teams/crash-recovery.js";
 import type {
   AgentDefinition,
@@ -202,16 +202,48 @@ async function dispatchAgentForTask(
   const sessionModel = ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : undefined;
   const model = modelOverride ?? agentDef.model ?? sessionModel;
 
-  // Resolve skills to inject into the agent's system prompt.
-  const { text: skillsText, missing: missingSkills } = resolveSkills(
-    projectCwd,
-    agentDef.skills ?? [],
-  );
+  // Resolve declared skills to --skill <dir> paths for force-preloading.
+  // This ensures skills are available even when --no-extensions may suppress
+  // package-declared skill discovery.
+  const skillDirsList = readPiSkillDirs(projectCwd);
+  const resolvedSkillDirs: string[] = [];
+  const missingSkills: string[] = [];
+  for (const skillName of agentDef.skills ?? []) {
+    const dir = findSkillDir(skillDirsList, skillName);
+    if (dir) {
+      resolvedSkillDirs.push(dir);
+    } else {
+      missingSkills.push(skillName);
+    }
+  }
   if (missingSkills.length > 0) {
     ctx.ui.notify(
-      `Agent "${agentName}": skills not found and will be skipped: ${missingSkills.join(", ")}`,
+      `Agent "${agentName}": skills not found: ${missingSkills.join(", ")}`,
       "warning",
     );
+  }
+
+  // Resolve declared extensions to -e <path> args.
+  let extensionArgs: string[] | undefined;
+  if (agentDef.extensions !== undefined) {
+    const extPaths = readPiExtensionPaths(projectCwd);
+    const resolvedArgs: string[] = [];
+    const missingExts: string[] = [];
+    for (const extName of agentDef.extensions) {
+      const absPath = extPaths[extName.toLowerCase()];
+      if (absPath) {
+        resolvedArgs.push("-e", absPath);
+      } else {
+        missingExts.push(extName);
+      }
+    }
+    if (missingExts.length > 0) {
+      ctx.ui.notify(
+        `Agent "${agentName}": extensions not found and will be skipped: ${missingExts.join(", ")}`,
+        "warning",
+      );
+    }
+    extensionArgs = resolvedArgs;
   }
 
   // Spawn the agent.
@@ -224,7 +256,8 @@ async function dispatchAgentForTask(
       cwd: agentCwd,
       model,
       allToolNames: ctx.getActiveTools?.() ?? [],
-      skillsText: skillsText || undefined,
+      extensionArgs,
+      skillDirs: resolvedSkillDirs.length > 0 ? resolvedSkillDirs : undefined,
     });
 
     // Log completion/failure handoff.
@@ -260,6 +293,11 @@ async function dispatchAgentForTask(
 // ── Extension ────────────────────────────────────
 
 export default function (pi: ExtensionAPI): void {
+  // Recursion guard: child agent processes set this env var so the agent-teams
+  // extension loads (and honours its skills/extensions) without registering
+  // orchestrator tools and becoming a recursive dispatcher.
+  if (process.env.PI_AGENT_TEAMS_CHILD === "1") return;
+
   // ── dispatch_agent Tool ──────────────────────
 
   pi.registerTool({

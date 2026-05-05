@@ -1,17 +1,20 @@
-// Agent Teams — skill loading and injection for child agents.
+// Agent Teams — skill and extension path resolution for child agent spawning.
 //
-// Skills are reusable `SKILL.md` snippets injected into an agent's system prompt.
-// Discovery uses the `pi.skills` directories declared in the project's `package.json`,
-// so agent skills are drawn from the same pool as parent-session skills.
+// Skills are discovered natively by the child pi process via progressive disclosure.
+// This module handles two things:
 //
-// Directory layout (project-first precedence):
-//   ./skills/<name>/SKILL.md
-//   node_modules/<pkg>/skills/<name>/SKILL.md
-//   ... (any other paths listed in package.json -> pi.skills)
+//   1. Resolving declared skill names to directory paths for `--skill <dir>` force-preloading.
+//      This ensures skills are available even when `--no-extensions` suppresses
+//      package-declared skill discovery paths.
+//
+//   2. Resolving declared extension names to absolute paths for `-e <path>` selective loading.
+//      Used when an agent frontmatter declares `extensions: security, sandbox` to restrict
+//      which extensions the child process loads.
+//
+// Both rely on reading the project's `package.json` for configuration.
 
 import { existsSync, readFileSync } from "node:fs";
-import { join, resolve } from "node:path";
-import { parseFrontmatter } from "@mariozechner/pi-coding-agent";
+import { basename, extname, join, resolve } from "node:path";
 
 /**
  * Read the `pi.skills` directories from the project's `package.json`.
@@ -35,59 +38,51 @@ export function readPiSkillDirs(cwd: string): string[] {
 }
 
 /**
- * Load a single skill by name from the given skill directories.
- * Searches each directory for `<name>/SKILL.md` in order, returning the
- * body of the first match (frontmatter stripped). Returns `null` if the
- * skill is not found in any directory.
+ * Find the directory path for a skill by name.
+ * Searches each skill directory for a subdirectory named `<name>` containing
+ * a `SKILL.md` file. Returns the first match (project-first precedence).
+ * Returns `null` if the skill is not found in any directory.
+ *
+ * The returned path is the skill's parent directory (not the SKILL.md file),
+ * suitable for passing to `--skill <dir>`.
  */
-export function loadSkill(skillDirs: string[], name: string): string | null {
+export function findSkillDir(skillDirs: string[], name: string): string | null {
   for (const dir of skillDirs) {
-    const skillPath = join(dir, name, "SKILL.md");
-    if (!existsSync(skillPath)) continue;
-    try {
-      const raw = readFileSync(skillPath, "utf-8");
-      const { body } = parseFrontmatter(raw);
-      return body.trim();
-    } catch {
-      continue;
+    const skillDir = join(dir, name);
+    if (existsSync(join(skillDir, "SKILL.md"))) {
+      return skillDir;
     }
   }
   return null;
 }
 
 /**
- * Resolve a list of skill names to their formatted injection text.
+ * Read the `pi.extensions` list from the project's `package.json` and return
+ * a map of `{ lowercased-basename-without-ext → absolute-path }`.
  *
- * Each found skill is wrapped in an XML block:
- *   <skill name="safe-bash">
- *   ...content...
- *   </skill>
+ * For example, `"./extensions/security.ts"` maps to `"security"`.
+ * Used to resolve agent frontmatter `extensions: security, sandbox` to
+ * absolute paths for `-e <path>` child process args.
  *
- * Returns:
- *  - `text`: all found skills joined with blank lines (empty string if none found)
- *  - `missing`: names of skills that could not be found in any skill directory
+ * Returns an empty object if the field is absent or the file cannot be read.
  */
-export function resolveSkills(
-  cwd: string,
-  skillNames: string[],
-): { text: string; missing: string[] } {
-  if (skillNames.length === 0) return { text: "", missing: [] };
-
-  const skillDirs = readPiSkillDirs(cwd);
-  const blocks: string[] = [];
-  const missing: string[] = [];
-
-  for (const name of skillNames) {
-    const body = loadSkill(skillDirs, name);
-    if (body === null) {
-      missing.push(name);
-    } else {
-      blocks.push(`<skill name="${name}">\n${body}\n</skill>`);
+export function readPiExtensionPaths(cwd: string): Record<string, string> {
+  const pkgPath = join(cwd, "package.json");
+  try {
+    const raw = readFileSync(pkgPath, "utf-8");
+    const pkg = JSON.parse(raw) as Record<string, unknown>;
+    const piField = pkg["pi"] as Record<string, unknown> | undefined;
+    const extsField = piField?.["extensions"];
+    if (!Array.isArray(extsField)) return {};
+    const result: Record<string, string> = {};
+    for (const entry of extsField) {
+      if (typeof entry !== "string") continue;
+      const absPath = resolve(cwd, entry);
+      const name = basename(entry, extname(entry)).toLowerCase();
+      result[name] = absPath;
     }
+    return result;
+  } catch {
+    return {};
   }
-
-  return {
-    text: blocks.join("\n\n"),
-    missing,
-  };
 }

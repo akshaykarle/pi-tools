@@ -22,11 +22,19 @@ export interface SpawnAgentOptions {
   /** All available tool names (used to compute allowlist from disallowedTools). */
   allToolNames?: string[];
   /**
-   * Pre-formatted skills text to append to the agent's system prompt.
-   * Each skill is wrapped in `<skill name="...">...</skill>` XML blocks.
-   * Pass the output of `resolveSkills()` here.
+   * Explicit `-e <path>` extension args to pass to the child process.
+   * When present, `--no-extensions` is prepended automatically so that only
+   * these extensions load (ignoring settings.json discovery).
+   * When absent, all project extensions load (minus agent-teams, which is
+   * guarded by the `PI_AGENT_TEAMS_CHILD` environment variable).
    */
-  skillsText?: string;
+  extensionArgs?: string[];
+  /**
+   * Skill directory paths to force-preload via `--skill <dir>`.
+   * Used when `extensions` filtering may suppress package-declared skill
+   * discovery, or when the agent frontmatter declares specific skills.
+   */
+  skillDirs?: string[];
   /** Callback for progress updates (last line of agent output). */
   onProgress?: (text: string) => void;
   /** AbortSignal to cancel the agent. */
@@ -56,25 +64,35 @@ export function resolveToolsList(
 }
 
 /**
- * Spawn a child `pi` process for an agent and return a promise that resolves
- * with the agent's output, exit code, and elapsed time.
+ * Build the `pi` CLI args array for a child agent process.
+ * Exported for testing — `spawnAgent` calls this internally.
  */
-export function spawnAgent(opts: SpawnAgentOptions): Promise<AgentRunResult> {
-  const { agent, task, workspace, cwd, model, allToolNames, skillsText, onProgress, signal } = opts;
-
-  // Combine agent system prompt with any injected skills.
-  const fullSystemPrompt = skillsText
-    ? `${agent.systemPrompt}\n\n${skillsText}`
-    : agent.systemPrompt;
+export function buildAgentArgs(opts: Omit<SpawnAgentOptions, "onProgress" | "signal">): string[] {
+  const { agent, task, workspace, model, allToolNames, extensionArgs, skillDirs } = opts;
 
   const args: string[] = [
     "--mode", "json",
     "-p",
-    "--no-extensions",
     "--thinking", "off",
-    "--append-system-prompt", fullSystemPrompt,
+    "--append-system-prompt", agent.systemPrompt,
     "--session", workspace.sessionFile,
   ];
+
+  // Extension control: if an allowlist is provided, use --no-extensions + explicit -e flags.
+  // Otherwise let normal discovery run (PI_AGENT_TEAMS_CHILD guards against recursion).
+  if (extensionArgs !== undefined) {
+    args.push("--no-extensions");
+    args.push(...extensionArgs);
+  }
+
+  // Force-preload declared skills via --skill <dir>.
+  // This ensures skills are available even when --no-extensions may suppress
+  // package-declared skill discovery paths.
+  if (skillDirs && skillDirs.length > 0) {
+    for (const dir of skillDirs) {
+      args.push("--skill", dir);
+    }
+  }
 
   // Set model if provided.
   if (model) {
@@ -95,6 +113,17 @@ export function spawnAgent(opts: SpawnAgentOptions): Promise<AgentRunResult> {
   // Task prompt goes last.
   args.push(task);
 
+  return args;
+}
+
+/**
+ * Spawn a child `pi` process for an agent and return a promise that resolves
+ * with the agent's output, exit code, and elapsed time.
+ */
+export function spawnAgent(opts: SpawnAgentOptions): Promise<AgentRunResult> {
+  const { cwd, onProgress, signal } = opts;
+  const args = buildAgentArgs(opts);
+
   const startTime = Date.now();
   const textChunks: string[] = [];
 
@@ -104,7 +133,9 @@ export function spawnAgent(opts: SpawnAgentOptions): Promise<AgentRunResult> {
       proc = spawn("pi", args, {
         cwd,
         stdio: ["ignore", "pipe", "pipe"],
-        env: { ...process.env },
+        // PI_AGENT_TEAMS_CHILD prevents agent-teams.ts from registering
+        // orchestrator tools in the child process (recursion guard).
+        env: { ...process.env, PI_AGENT_TEAMS_CHILD: "1" },
       });
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);

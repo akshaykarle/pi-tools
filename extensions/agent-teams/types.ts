@@ -26,10 +26,28 @@ export interface AgentDefinition {
    */
   model?: string;
   /**
-   * Skill names to inject into this agent's system prompt.
-   * Skills are discovered from the `pi.skills` directories in `package.json`.
+   * Skill names to force-preload via `--skill <dir>` when spawning the child process.
+   *
+   * **Only set this when the agent also has a restricted `extensions:` field.**
+   * In the default case (`extensions` absent), all project skills auto-discover
+   * natively in the child process — no declaration needed.
+   *
+   * When `extensions:` restricts loading (`--no-extensions` mode), package-declared
+   * `pi.skills` paths may be suppressed. Listing skills here passes explicit
+   * `--skill <dir>` args to ensure they are always available.
    */
   skills?: string[];
+  /**
+   * Controls which extensions load in the child agent process.
+   *
+   * - `undefined` (absent in frontmatter): all project extensions load. The
+   *   `PI_AGENT_TEAMS_CHILD` env var prevents agent-teams from recursing.
+   * - `[]` (empty — `extensions: ""` in frontmatter): `--no-extensions` is passed;
+   *   no extension `.ts` files load. Project-local `.pi/skills/` still auto-discovers.
+   * - `["security", "sandbox"]`: `--no-extensions -e <security-path> -e <sandbox-path>`.
+   *   Only the listed extensions load.
+   */
+  extensions?: string[];
   /** System prompt injected into the child pi session. Taken from the markdown body. */
   systemPrompt: string;
   /** Absolute path to the source `.md` file. */

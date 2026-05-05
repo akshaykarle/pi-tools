@@ -89,6 +89,40 @@ Just a plain agent.
     expect(def).not.toBeNull();
     expect(def!.model).toBeUndefined();
     expect(def!.skills).toBeUndefined();
+    expect(def!.extensions).toBeUndefined();
+  });
+
+  it("parses extensions: allowlist", () => {
+    const filePath = join(tmpDir, "ext-agent.md");
+    writeFileSync(
+      filePath,
+      `---
+name: ext-agent
+extensions: security, sandbox
+---
+Body.
+`,
+    );
+    const def = parseAgentFile(filePath);
+    expect(def).not.toBeNull();
+    expect(def!.extensions).toEqual(["security", "sandbox"]);
+  });
+
+  it("parses extensions: empty string as empty array (--no-extensions mode)", () => {
+    const filePath = join(tmpDir, "isolated-agent.md");
+    writeFileSync(
+      filePath,
+      `---
+name: isolated-agent
+extensions:
+---
+Body.
+`,
+    );
+    const def = parseAgentFile(filePath);
+    expect(def).not.toBeNull();
+    // Empty string → [] (distinct from undefined)
+    expect(def!.extensions).toEqual([]);
   });
 
   it("parses disallowedTools", () => {

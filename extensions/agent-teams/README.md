@@ -70,11 +70,16 @@ Agent `.md` files use YAML frontmatter:
 | `tools` | No | Comma-separated allowlist (e.g. `read,grep,find,ls`) |
 | `disallowedTools` | No | Comma-separated denylist (mutually exclusive with `tools`) |
 | `model` | No | Default model for this agent (e.g. `anthropic/claude-haiku-4-5`). Overrides the parent session model. Can itself be overridden per-dispatch via the `model` param on `dispatch_agent`. |
-| `skills` | No | Comma-separated list of skill names to inject into this agent's system prompt (e.g. `safe-bash, workspace-notes`). Skills are discovered from the `pi.skills` directories in `package.json`. |
+| `extensions` | No | Controls which extensions load in the child process. **Absent** (default): all project extensions load, skills auto-discover — no `skills:` needed. **Empty** (`extensions:`): `--no-extensions`, no extensions load, skills no longer auto-discover — use `skills:` to list what the agent needs. **List** (`extensions: security, sandbox`): only named extensions load, same skills caveat — use `skills:`. Names matched case-insensitively against basenames in `package.json pi.extensions`. See [Skills](#skills) for the full decision rule. |
+| `skills` | No | Comma-separated skill names to force-preload (e.g. `read-only, workspace-notes`). **Only set this when `extensions:` is also set** (empty or a list). When `extensions:` is absent, omit `skills:` entirely — skills auto-discover natively. See [Skills](#skills). |
 
 The markdown body becomes the agent's system prompt.
 
-### Example with all fields
+### Examples
+
+**Default — `extensions:` absent, `skills:` absent (most agents)**
+
+All project extensions load (agent-teams is guarded against recursion). All project skills auto-discover natively. Nothing extra to declare.
 
 ```markdown
 ---
@@ -82,9 +87,37 @@ name: researcher
 description: Explores codebases and produces research summaries
 tools: read,grep,find,ls,bash
 model: anthropic/claude-haiku-4-5
-skills: read-only, workspace-notes
 ---
 You are a research specialist.
+```
+
+**Restricted extensions — `extensions:` list, `skills:` required**
+
+Only the named extensions load. Because `--no-extensions` is passed, `pi.skills` package paths are suppressed. List every skill the agent needs.
+
+```markdown
+---
+name: sandboxed-worker
+description: Runs with only security and sandbox extensions
+tools: read,write,edit,bash
+extensions: security, sandbox
+skills: workspace-notes
+---
+You are a sandboxed implementation agent.
+```
+
+**Fully isolated — `extensions:` empty, `skills:` required**
+
+No extension `.ts` files load at all. Skills must be listed explicitly — they will not auto-discover.
+
+```markdown
+---
+name: isolated-agent
+description: Fully isolated, no extensions
+extensions:
+skills: read-only
+---
+You are a read-only agent with no extensions.
 ```
 
 ## Team Config Format
@@ -101,35 +134,60 @@ team-name:
 
 ## Skills
 
-Skills are reusable `SKILL.md` snippets injected into an agent's system prompt at spawn time. They let you share common instructions across agents without copy-pasting.
+### Decision rule: when to use `skills:`
 
-Skills are discovered from the `pi.skills` directories declared in `package.json` (project-first precedence):
+| `extensions:` field | Skills behaviour | Use `skills:`? |
+|---|---|---|
+| **Absent** (default) | All project skills auto-discover natively via pi’s progressive disclosure. The child process scans `pi.skills` directories at startup. | **No — omit `skills:`** |
+| **Empty** (`extensions:`) | `--no-extensions` is passed. Package-declared `pi.skills` paths are suppressed and skills no longer auto-discover. | **Yes — list every skill the agent needs** |
+| **List** (`extensions: security, sandbox`) | `--no-extensions` is passed. Same suppression applies. | **Yes — list every skill the agent needs** |
+
+In short: **`skills:` is only ever needed alongside `extensions:`**. If you haven’t set `extensions:`, don’t set `skills:` either.
+
+```yaml
+# ✔ Correct — extensions absent, skills absent: auto-discovery handles everything
+name: researcher
+tools: read,grep,find,ls,bash
+
+# ✔ Correct — extensions restricted, skills explicitly listed
+name: sandboxed-worker
+extensions: security, sandbox
+skills: read-only, workspace-notes
+
+# ✘ Wrong — redundant: skills will auto-discover anyway when extensions is absent
+name: researcher
+skills: read-only, workspace-notes  # unnecessary
+```
+
+### How native skill discovery works
+
+Child agents use pi’s **progressive disclosure** skill system. At startup, the child process scans the `pi.skills` directories declared in `package.json` and injects stubs into its system prompt:
+
+```xml
+<skill name="read-only" location="./skills/read-only/SKILL.md">
+Constrains the agent to read-only operations
+</skill>
+```
+
+The agent loads the full `SKILL.md` on-demand via its `read` tool (or `/skill:name` command) when it needs it. Only descriptions are always in context; full instructions are fetched lazily.
+
+Skills are declared in `package.json`:
 
 ```json
 "pi": { "skills": ["./skills", "node_modules/some-pkg/skills"] }
 ```
 
-Each skill is a directory containing a `SKILL.md` file:
+Each skill is a directory containing a `SKILL.md`:
 
 ```
 skills/
-  safe-bash/
-    SKILL.md       # "Be careful with bash — never use rm -rf etc."
   read-only/
-    SKILL.md       # "You are READ-ONLY. Never modify files."
+    SKILL.md
   workspace-notes/
-    SKILL.md       # "Write your working notes to your workspace notes file."
+    SKILL.md
 ```
 
-Skill content is wrapped in XML tags and appended to the agent's system prompt:
-
-```xml
-<skill name="safe-bash">
-Be careful with bash. Never use rm -rf, truncate, or other destructive commands.
-</skill>
-```
-
-Missing skills produce a warning notification but do not fail the dispatch.
+When `skills:` is set, each named skill is resolved to its directory path and passed as `--skill <dir>` to the child process, bypassing package discovery. Missing skills produce a warning notification but do not fail the dispatch.
 
 ## Commands
 

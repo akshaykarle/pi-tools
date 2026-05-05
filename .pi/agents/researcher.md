@@ -3,7 +3,6 @@ name: researcher
 description: Explores codebases, reads documentation, and produces research summaries. Read-only — never modifies files.
 tools: read,grep,find,ls,bash
 model: anthropic/claude-haiku-4-5
-skills: read-only, workspace-notes
 ---
 You are a research specialist on an agent team. Your job is to explore, analyze, and document findings.
 

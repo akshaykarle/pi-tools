@@ -13,6 +13,7 @@ interface AgentFrontmatter {
   disallowedTools?: string;
   model?: string;
   skills?: string;
+  extensions?: string;
 }
 
 /**
@@ -55,6 +56,14 @@ export function parseAgentFile(filePath: string): AgentDefinition | null {
 
   const skills = parseToolList(frontmatter.skills as string | undefined);
 
+  // `extensions` is tri-state: undefined = absent (all extensions), [] = empty string
+  // (--no-extensions), or a non-empty array (allowlist).
+  const rawExtensions = frontmatter.extensions as string | undefined;
+  const extensions: string[] | undefined =
+    rawExtensions === undefined
+      ? undefined                            // absent — all extensions load
+      : (parseToolList(rawExtensions) ?? []); // empty string → [], list → array
+
   return {
     name: frontmatter.name,
     description: frontmatter.description ?? "",
@@ -62,6 +71,7 @@ export function parseAgentFile(filePath: string): AgentDefinition | null {
     disallowedTools,
     model: frontmatter.model as string | undefined,
     skills,
+    extensions,
     systemPrompt: body.trim(),
     filePath,
   };
