@@ -119,6 +119,10 @@ export default function (pi: ExtensionAPI): void {
           try {
             removeWorktree(repoRoot, targetPath, { force: true });
             ctx.ui.notify(`Worktree removed: ${targetPath}`, "info");
+            if (targetPath === activeCwd) {
+              activeCwd = undefined;
+              ctx.ui.setStatus("worktree", undefined);
+            }
           } catch (err) {
             const msg = err instanceof Error ? err.message : String(err);
             ctx.ui.notify(`Failed to remove worktree: ${msg}`, "error");
@@ -145,6 +149,7 @@ export default function (pi: ExtensionAPI): void {
           process.chdir(target.path);
           activeCwd = target.path;
           ctx.ui.notify(`Switched to worktree: ${target.path}`, "info");
+          ctx.ui.setStatus("worktree", ctx.ui.theme.fg("accent", `⎇ ${target.branch}`));
           return;
         }
 
@@ -180,11 +185,11 @@ export default function (pi: ExtensionAPI): void {
 
     // Find existing worktree or create it.
     let targetPath: string;
+    let result: CreateWorktreeResult | undefined;
     const existing = findWorktreeByName(repoRoot, worktreeName);
     if (existing) {
       targetPath = existing.path;
     } else {
-      let result: CreateWorktreeResult;
       try {
         result = createWorktree(repoRoot, worktreeName);
       } catch (err) {
@@ -202,5 +207,7 @@ export default function (pi: ExtensionAPI): void {
     process.chdir(targetPath);
     activeCwd = targetPath;
     ctx.ui.notify(`Switched to worktree: ${targetPath}`, "info");
+    const activeBranch = existing ? existing.branch : result!.branch;
+    ctx.ui.setStatus("worktree", ctx.ui.theme.fg("accent", `⎇ ${activeBranch}`));
   });
 }
