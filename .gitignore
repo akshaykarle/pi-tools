@@ -6,3 +6,4 @@ dist/
 .direnv/
 .pi/agent-teams
 PLAN.md
+plans/
