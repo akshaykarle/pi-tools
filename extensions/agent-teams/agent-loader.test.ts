@@ -55,6 +55,42 @@ You are a research specialist.
     expect(def!.systemPrompt).toBe("You are a research specialist.");
   });
 
+  it("parses model and skills", () => {
+    const filePath = join(tmpDir, "smart-agent.md");
+    writeFileSync(
+      filePath,
+      `---
+name: smart-agent
+model: anthropic/claude-sonnet-4
+skills: safe-bash, workspace-notes
+---
+You are smart.
+`,
+    );
+
+    const def = parseAgentFile(filePath);
+    expect(def).not.toBeNull();
+    expect(def!.model).toBe("anthropic/claude-sonnet-4");
+    expect(def!.skills).toEqual(["safe-bash", "workspace-notes"]);
+  });
+
+  it("leaves model and skills undefined when absent", () => {
+    const filePath = join(tmpDir, "plain-agent.md");
+    writeFileSync(
+      filePath,
+      `---
+name: plain-agent
+---
+Just a plain agent.
+`,
+    );
+
+    const def = parseAgentFile(filePath);
+    expect(def).not.toBeNull();
+    expect(def!.model).toBeUndefined();
+    expect(def!.skills).toBeUndefined();
+  });
+
   it("parses disallowedTools", () => {
     const filePath = join(tmpDir, "safe-agent.md");
     writeFileSync(

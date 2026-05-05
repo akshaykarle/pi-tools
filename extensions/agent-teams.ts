@@ -21,6 +21,7 @@ import { createAgentWorkspace } from "./agent-teams/workspace.js";
 import { addTask, addTasks, getTask, listTasks, updateTask } from "./agent-teams/task-board.js";
 import { appendHandoff, loadHandoffs } from "./agent-teams/handoff-log.js";
 import { spawnAgent, resolveToolsList } from "./agent-teams/agent-runner.js";
+import { resolveSkills } from "./agent-teams/skill-loader.js";
 import { detectIncompleteRuns, formatIncompleteRunsSummary } from "./agent-teams/crash-recovery.js";
 import type {
   AgentDefinition,
@@ -70,7 +71,15 @@ function agentCatalog(): string {
         : a.disallowedTools
           ? `Disallowed tools: ${a.disallowedTools.join(", ")}`
           : "Tools: all";
-      return `### ${displayName(a.name)}\n**Dispatch as:** \`${a.name}\`\n${a.description}\n**${tools}**`;
+      const lines = [
+        `### ${displayName(a.name)}`,
+        `**Dispatch as:** \`${a.name}\``,
+        a.description,
+        `**${tools}**`,
+      ];
+      if (a.model) lines.push(`**Model:** ${a.model}`);
+      if (a.skills && a.skills.length > 0) lines.push(`**Skills:** ${a.skills.join(", ")}`);
+      return lines.join("\n");
     })
     .join("\n\n");
 }
@@ -97,6 +106,7 @@ async function dispatchAgentForTask(
   taskId: string,
   taskDescription: string,
   ctx: ExtensionContext,
+  modelOverride?: string,
 ): Promise<AgentRunResult> {
   const key = agentName.toLowerCase();
   const agentDef = teamAgents.get(key);
@@ -188,10 +198,21 @@ async function dispatchAgentForTask(
 
   const fullPrompt = `${contextPrefix}\n${taskDescription}`;
 
-  // Get model info from current context.
-  const model = ctx.model
-    ? `${ctx.model.provider}/${ctx.model.id}`
-    : undefined;
+  // Resolve model: per-dispatch override > agent frontmatter > parent session model.
+  const sessionModel = ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : undefined;
+  const model = modelOverride ?? agentDef.model ?? sessionModel;
+
+  // Resolve skills to inject into the agent's system prompt.
+  const { text: skillsText, missing: missingSkills } = resolveSkills(
+    projectCwd,
+    agentDef.skills ?? [],
+  );
+  if (missingSkills.length > 0) {
+    ctx.ui.notify(
+      `Agent "${agentName}": skills not found and will be skipped: ${missingSkills.join(", ")}`,
+      "warning",
+    );
+  }
 
   // Spawn the agent.
   runningCount++;
@@ -203,6 +224,7 @@ async function dispatchAgentForTask(
       cwd: agentCwd,
       model,
       allToolNames: ctx.getActiveTools?.() ?? [],
+      skillsText: skillsText || undefined,
     });
 
     // Log completion/failure handoff.
@@ -257,13 +279,18 @@ export default function (pi: ExtensionAPI): void {
       agent: Type.String({ description: "Agent name (case-insensitive, e.g. 'researcher')" }),
       taskId: Type.String({ description: "Task ID from the task board to assign to this agent" }),
       task: Type.String({ description: "Detailed task description for the agent" }),
+      model: Type.Optional(Type.String({
+        description:
+          "Model override for this dispatch (e.g. 'anthropic/claude-haiku-4-5'). Defaults to the agent's configured model or the session model.",
+      })),
     }),
 
     async execute(_toolCallId, params, _signal, onUpdate, ctx) {
-      const { agent, taskId, task } = params as {
+      const { agent, taskId, task, model } = params as {
         agent: string;
         taskId: string;
         task: string;
+        model?: string;
       };
 
       if (onUpdate) {
@@ -274,7 +301,7 @@ export default function (pi: ExtensionAPI): void {
       }
 
       try {
-        const result = await dispatchAgentForTask(agent, taskId, task, ctx);
+        const result = await dispatchAgentForTask(agent, taskId, task, ctx, model);
         const truncated =
           result.output.length > 8000
             ? result.output.slice(0, 8000) + "\n\n... [truncated]"

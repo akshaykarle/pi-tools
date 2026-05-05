@@ -11,6 +11,8 @@ interface AgentFrontmatter {
   description?: string;
   tools?: string;
   disallowedTools?: string;
+  model?: string;
+  skills?: string;
 }
 
 /**
@@ -51,11 +53,15 @@ export function parseAgentFile(filePath: string): AgentDefinition | null {
     return null;
   }
 
+  const skills = parseToolList(frontmatter.skills as string | undefined);
+
   return {
     name: frontmatter.name,
     description: frontmatter.description ?? "",
     tools,
     disallowedTools,
+    model: frontmatter.model as string | undefined,
+    skills,
     systemPrompt: body.trim(),
     filePath,
   };

@@ -19,6 +19,17 @@ export interface AgentDefinition {
    * Mutually exclusive with `tools`.
    */
   disallowedTools?: string[];
+  /**
+   * Default model for this agent (e.g. `anthropic/claude-haiku-4-5`).
+   * Overrides the parent session model. Can itself be overridden per-dispatch
+   * via the `model` param on `dispatch_agent`.
+   */
+  model?: string;
+  /**
+   * Skill names to inject into this agent's system prompt.
+   * Skills are discovered from the `pi.skills` directories in `package.json`.
+   */
+  skills?: string[];
   /** System prompt injected into the child pi session. Taken from the markdown body. */
   systemPrompt: string;
   /** Absolute path to the source `.md` file. */

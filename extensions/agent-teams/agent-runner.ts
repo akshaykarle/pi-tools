@@ -21,6 +21,12 @@ export interface SpawnAgentOptions {
   model?: string;
   /** All available tool names (used to compute allowlist from disallowedTools). */
   allToolNames?: string[];
+  /**
+   * Pre-formatted skills text to append to the agent's system prompt.
+   * Each skill is wrapped in `<skill name="...">...</skill>` XML blocks.
+   * Pass the output of `resolveSkills()` here.
+   */
+  skillsText?: string;
   /** Callback for progress updates (last line of agent output). */
   onProgress?: (text: string) => void;
   /** AbortSignal to cancel the agent. */
@@ -54,14 +60,19 @@ export function resolveToolsList(
  * with the agent's output, exit code, and elapsed time.
  */
 export function spawnAgent(opts: SpawnAgentOptions): Promise<AgentRunResult> {
-  const { agent, task, workspace, cwd, model, allToolNames, onProgress, signal } = opts;
+  const { agent, task, workspace, cwd, model, allToolNames, skillsText, onProgress, signal } = opts;
+
+  // Combine agent system prompt with any injected skills.
+  const fullSystemPrompt = skillsText
+    ? `${agent.systemPrompt}\n\n${skillsText}`
+    : agent.systemPrompt;
 
   const args: string[] = [
     "--mode", "json",
     "-p",
     "--no-extensions",
     "--thinking", "off",
-    "--append-system-prompt", agent.systemPrompt,
+    "--append-system-prompt", fullSystemPrompt,
     "--session", workspace.sessionFile,
   ];
 
