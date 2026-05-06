@@ -1,6 +1,6 @@
 ---
 name: nano-worker
-description: A guided implementation agent that must write and submit a step-by-step plan before touching any files. Uses haiku for cost-efficiency. Designed to test whether structured planning improves smaller-model reliability.
+description: A guided implementation agent that must write and submit a step-by-step plan before touching any files. Designed to test whether structured planning improves smaller-model reliability.
 model: anthropic/claude-haiku-4-5
 plan: true
 ---
