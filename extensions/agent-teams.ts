@@ -12,12 +12,13 @@
 //   /team-status   — show run status and task board
 //   /team-handoffs — display the handoff audit log
 
+import { existsSync, readFileSync } from "node:fs";
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import { Type } from "typebox";
 import { loadAgentDefinitions } from "./agent-teams/agent-loader.js";
 import { loadTeams } from "./agent-teams/team-loader.js";
 import { createRun, runDir, updateRunStatus } from "./agent-teams/run-manager.js";
-import { createAgentWorkspace } from "./agent-teams/workspace.js";
+import { createAgentWorkspace, getAgentWorkspacePaths } from "./agent-teams/workspace.js";
 import { addTask, addTasks, getTask, listTasks, updateTask } from "./agent-teams/task-board.js";
 import { appendHandoff, loadHandoffs } from "./agent-teams/handoff-log.js";
 import { spawnAgent, resolveToolsList } from "./agent-teams/agent-runner.js";
@@ -54,6 +55,29 @@ const teamAgents = new Map<string, AgentDefinition>();
 /** Track how many agents are currently running (for concurrency control). */
 let runningCount = 0;
 
+// ── Agent Panel State ─────────────────────────────
+/** Per-agent live state used to render the team panel widget. */
+interface AgentPanelState {
+  status: "idle" | "dispatching" | "running" | "done" | "error";
+  /** Short model name (provider prefix stripped), e.g. "haiku-4-5". */
+  model?: string;
+  taskId?: string;
+  /** Short task title looked up from tasks.json at dispatch time. */
+  taskTitle?: string;
+  /** Epoch ms when the most recent dispatch started (for elapsed). */
+  startMs?: number;
+  /** Most recent totalTokens from session.json (updated every timer tick). */
+  totalTokens?: number;
+  /** Last non-empty progress line from onProgress callback. */
+  lastProgress?: string;
+  /** Session file path (set at dispatch time for live token polling). */
+  sessionFile?: string;
+}
+
+const agentPanel = new Map<string, AgentPanelState>();
+let panelCtx: ExtensionContext | undefined;
+let panelTimer: ReturnType<typeof setInterval> | null = null;
+
 // ── Helpers ──────────────────────────────────────
 
 function displayName(name: string): string {
@@ -84,6 +108,185 @@ function agentCatalog(): string {
     .join("\n\n");
 }
 
+// ── Agent status helpers ──────────────────────────────────────────────────────
+
+/** Format milliseconds as m:ss or h:mm:ss. */
+function fmtMs(ms: number): string {
+  const s = Math.floor(ms / 1000);
+  const m = Math.floor(s / 60);
+  const h = Math.floor(m / 60);
+  const ss = String(s % 60).padStart(2, "0");
+  const mm = String(m % 60).padStart(2, "0");
+  return h > 0 ? `${h}:${mm}:${ss}` : `${m}:${ss}`;
+}
+
+/** Format a token count as "15.9K" / "204K" / "1.2M". */
+function fmtTokens(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
+  return String(n);
+}
+
+/**
+ * Read the most recent totalTokens from the last assistant message in an
+ * agent's session.json (NDJSON). Returns undefined if the file doesn't exist
+ * or contains no assistant messages with usage data.
+ */
+function readLastTokenCount(sessionFilePath: string): number | undefined {
+  try {
+    if (!existsSync(sessionFilePath)) return undefined;
+    const lines = readFileSync(sessionFilePath, "utf-8")
+      .split("\n")
+      .filter((l) => l.trim());
+    for (let i = lines.length - 1; i >= 0; i--) {
+      try {
+        const ev = JSON.parse(lines[i]!) as Record<string, unknown>;
+        const msg = ev["message"] as Record<string, unknown> | undefined;
+        if (ev["type"] === "message" && msg?.["role"] === "assistant") {
+          const usage = msg["usage"] as Record<string, unknown> | undefined;
+          if (typeof usage?.["totalTokens"] === "number") {
+            return usage["totalTokens"] as number;
+          }
+        }
+      } catch {
+        continue;
+      }
+    }
+  } catch {
+    // File unreadable or other error — silently return undefined.
+  }
+  return undefined;
+}
+
+// ── Agent Panel Widget ────────────────────────────────────────────────────────
+
+const ANSI_RESET = "\x1b[0m";
+const ANSI_DIM = "\x1b[2m";
+const ANSI_BOLD = "\x1b[1m";
+const ANSI_GREEN = "\x1b[32m";
+const ANSI_YELLOW = "\x1b[33m";
+const ANSI_RED = "\x1b[31m";
+const ANSI_CYAN = "\x1b[36m";
+
+function ansiLen(s: string): number {
+  return s.replace(/\x1b\[[0-9;]*m/g, "").length;
+}
+
+function padTo(s: string, width: number): string {
+  const plain = s.replace(/\x1b\[[0-9;]*m/g, "");
+  const diff = width - plain.length;
+  return diff > 0 ? s + " ".repeat(diff) : s;
+}
+
+function trunc(s: string, width: number): string {
+  if (s.length <= width) return s;
+  return s.slice(0, width - 1) + "\u2026";
+}
+
+/** 10-char context bar using block characters. */
+function ctxBar(pct: number): string {
+  const filled = Math.round(pct / 10);
+  const bar = "\u2588".repeat(filled) + "\u2591".repeat(10 - filled);
+  const color = pct >= 85 ? ANSI_RED : pct >= 60 ? ANSI_YELLOW : ANSI_GREEN;
+  return `${color}${bar}${ANSI_RESET}`;
+}
+
+/** Build the full widget as a string array. */
+function buildPanelLines(): string[] {
+  const width = process.stdout.columns ?? 100;
+  const runStatus = currentRun?.status ?? "none";
+
+  // Status icon and colour for the run
+  const runIcon = runStatus === "running" ? `${ANSI_GREEN}\u25cf${ANSI_RESET}`
+    : runStatus === "completed" ? `${ANSI_CYAN}\u2713${ANSI_RESET}`
+    : runStatus === "failed" ? `${ANSI_RED}\u2717${ANSI_RESET}`
+    : `${ANSI_DIM}\u25cb${ANSI_RESET}`;
+
+  const runLabel = currentRun
+    ? `${ANSI_BOLD}${activeTeamName}${ANSI_RESET}  ${runIcon}  ${ANSI_DIM}${currentRun.runId.slice(-8)}${ANSI_RESET}`
+    : `${ANSI_BOLD}${activeTeamName}${ANSI_RESET}  ${runIcon}  ${ANSI_DIM}idle${ANSI_RESET}`;
+
+  const headerText = ` \u25c6 ${runLabel} `;
+  const headerPlainLen = ansiLen(headerText) + 2; // leading " ─── " prefix
+  const dashes = "\u2500".repeat(Math.max(0, width - headerPlainLen - 4));
+  const header = `${ANSI_DIM} \u2500\u2500\u2500 ${ANSI_RESET}${headerText}${ANSI_DIM}${dashes}${ANSI_RESET}`;
+
+  const footer = `${ANSI_DIM}${"\u2500".repeat(width)}${ANSI_RESET}`;
+
+  const rows: string[] = [];
+  for (const [name, state] of agentPanel) {
+    const icon = state.status === "running" ? "\uD83D\uDFE2"
+      : state.status === "dispatching" ? "\uD83D\uDFE1"
+      : state.status === "done" ? "\u2705"
+      : state.status === "error" ? "\u274C"
+      : "\u26AA";
+
+    const rowColor = state.status === "running" ? ANSI_GREEN
+      : state.status === "done" ? ANSI_CYAN
+      : state.status === "error" ? ANSI_RED
+      : state.status === "dispatching" ? ANSI_YELLOW
+      : ANSI_DIM;
+
+    const modelStr = state.model ? trunc(state.model, 14) : "\u2500";
+    const nameStr = padTo(name, 12);
+    const modelPadded = padTo(modelStr, 14);
+
+    let taskPart: string;
+    if (state.status === "idle") {
+      taskPart = padTo(ANSI_DIM + "idle" + ANSI_RESET, 24 + ANSI_DIM.length + ANSI_RESET.length);
+    } else if (state.status === "dispatching") {
+      taskPart = padTo(ANSI_DIM + "(dispatching\u2026)" + ANSI_RESET, 24 + ANSI_DIM.length + ANSI_RESET.length);
+    } else {
+      const title = state.taskTitle ?? state.taskId ?? "";
+      taskPart = padTo(trunc(title, 24), 24);
+    }
+
+    let statsPart = "";
+    if (state.status !== "idle" && state.status !== "dispatching" && state.totalTokens !== undefined) {
+      const pct = Math.min(100, Math.round((state.totalTokens / 200_000) * 100));
+      const bar = ctxBar(pct);
+      const pctStr = `${String(pct).padStart(3)}%`;
+      const tokStr = padTo(fmtTokens(state.totalTokens), 6);
+      statsPart = `  ${bar}  ${pctStr}  ${tokStr}`;
+    }
+
+    let elapsedPart = "";
+    if (state.startMs !== undefined && (state.status === "running" || state.status === "dispatching")) {
+      elapsedPart = `  ${ANSI_DIM}${fmtMs(Date.now() - state.startMs)}${ANSI_RESET}`;
+    }
+
+    const row = `  ${icon}  ${rowColor}${nameStr}${ANSI_RESET}  ${ANSI_DIM}${modelPadded}${ANSI_RESET}  ${taskPart}${statsPart}${elapsedPart}`;
+    rows.push(row);
+  }
+
+  return [header, ...rows, footer];
+}
+
+function updatePanel(ctx: ExtensionContext): void {
+  ctx.ui.setWidget("agent-team-panel", buildPanelLines(), { placement: "belowEditor" });
+}
+
+function startPanelTimer(ctx: ExtensionContext): void {
+  if (panelTimer !== null) return;
+  panelTimer = setInterval(() => {
+    // Poll session files for running agents to refresh token counts live.
+    for (const [, state] of agentPanel) {
+      if (state.status === "running" && state.sessionFile) {
+        const fresh = readLastTokenCount(state.sessionFile);
+        if (fresh !== undefined) state.totalTokens = fresh;
+      }
+    }
+    updatePanel(ctx);
+  }, 1000);
+}
+
+function stopPanelTimer(): void {
+  if (panelTimer !== null) {
+    clearInterval(panelTimer);
+    panelTimer = null;
+  }
+}
+
 function activateTeam(teamName: string): void {
   activeTeamName = teamName;
   activeTeam = allTeams[teamName] || null;
@@ -111,6 +314,10 @@ async function dispatchAgentForTask(
   const key = agentName.toLowerCase();
   const agentDef = teamAgents.get(key);
   if (!agentDef) {
+    const ps0 = agentPanel.get(key) ?? { status: "idle" as const };
+    ps0.status = "error";
+    agentPanel.set(key, ps0);
+    updatePanel(ctx);
     return {
       output: `Agent "${agentName}" not found. Available: ${Array.from(teamAgents.keys()).join(", ")}`,
       exitCode: 1,
@@ -119,6 +326,10 @@ async function dispatchAgentForTask(
   }
 
   if (!currentRun || !currentRunDir) {
+    const ps1 = agentPanel.get(key) ?? { status: "idle" as const };
+    ps1.status = "error";
+    agentPanel.set(key, ps1);
+    updatePanel(ctx);
     return {
       output: "No active run. This is a bug — the run should have been created automatically.",
       exitCode: 1,
@@ -128,6 +339,10 @@ async function dispatchAgentForTask(
 
   // Check concurrency limit.
   if (activeTeam && runningCount >= activeTeam.maxConcurrency) {
+    const ps2 = agentPanel.get(key) ?? { status: "idle" as const };
+    ps2.status = "error";
+    agentPanel.set(key, ps2);
+    updatePanel(ctx);
     return {
       output: `Concurrency limit reached (${activeTeam.maxConcurrency}). Wait for a running agent to finish.`,
       exitCode: 1,
@@ -150,6 +365,10 @@ async function dispatchAgentForTask(
     try {
       const repoRoot = findGitRoot(projectCwd);
       if (!isCleanWorkingTree(repoRoot)) {
+        const ps3 = agentPanel.get(key) ?? { status: "idle" as const };
+        ps3.status = "error";
+        agentPanel.set(key, ps3);
+        updatePanel(ctx);
         return {
           output: "Cannot create worktree: working tree has uncommitted changes. Commit or stash first.",
           exitCode: 1,
@@ -161,6 +380,10 @@ async function dispatchAgentForTask(
       agentCwd = wt.path;
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
+      const ps4 = agentPanel.get(key) ?? { status: "idle" as const };
+      ps4.status = "error";
+      agentPanel.set(key, ps4);
+      updatePanel(ctx);
       return {
         output: `Failed to create worktree for ${agentName}: ${msg}. Falling back to shared workspace.`,
         exitCode: 1,
@@ -262,6 +485,26 @@ async function dispatchAgentForTask(
 
   // Spawn the agent.
   runningCount++;
+
+  // ── Agent panel state: dispatching ───────────────────────────────────────
+  const dispatchStartMs = Date.now();
+  const taskTitle = getTask(currentRunDir, taskId)?.title;
+  const workspacePaths = getAgentWorkspacePaths(currentRunDir, agentName);
+  {
+    const ps = agentPanel.get(key) ?? { status: "idle" as const };
+    ps.status = "dispatching";
+    ps.model = (model ?? agentDef.model ?? "")?.split("/").pop();
+    ps.taskId = taskId;
+    ps.taskTitle = taskTitle;
+    ps.startMs = dispatchStartMs;
+    ps.totalTokens = undefined;
+    ps.lastProgress = undefined;
+    ps.sessionFile = workspacePaths.sessionFile;
+    agentPanel.set(key, ps);
+  }
+  startPanelTimer(ctx);
+  updatePanel(ctx);
+
   try {
     const result = await spawnAgent({
       agent: agentDef,
@@ -272,7 +515,24 @@ async function dispatchAgentForTask(
       allToolNames: ctx.getActiveTools?.() ?? [],
       extensionArgs,
       skillDirs: resolvedSkillDirs.length > 0 ? resolvedSkillDirs : undefined,
+      onProgress: (text) => {
+        const ps = agentPanel.get(key);
+        if (ps) { ps.lastProgress = text; ps.status = "running"; }
+      },
     });
+
+    // Update panel state to done/error.
+    {
+      const ps = agentPanel.get(key);
+      if (ps) {
+        ps.status = result.exitCode === 0 ? "done" : "error";
+        const finalTokens = readLastTokenCount(workspacePaths.sessionFile);
+        if (finalTokens !== undefined) ps.totalTokens = finalTokens;
+        ps.lastProgress = undefined;
+        agentPanel.set(key, ps);
+      }
+      updatePanel(ctx);
+    }
 
     // Log completion/failure handoff.
     const handoffType = result.exitCode === 0 ? "completion" : "failure";
@@ -301,6 +561,8 @@ async function dispatchAgentForTask(
     return result;
   } finally {
     runningCount--;
+    if (runningCount === 0) stopPanelTimer();
+    updatePanel(ctx);
   }
 }
 
@@ -820,6 +1082,18 @@ ${agentCatalog()}`,
     currentRun = createRun(ctx.cwd, activeTeamName, "(goal will be set on first dispatch)");
     currentRunDir = runDir(ctx.cwd, activeTeamName, currentRun.runId);
 
+    // Initialise agentPanel for all team members and show idle panel.
+    panelCtx = ctx;
+    agentPanel.clear();
+    for (const memberName of (activeTeam?.members ?? [])) {
+      const def = teamAgents.get(memberName.toLowerCase());
+      agentPanel.set(memberName.toLowerCase(), {
+        status: "idle",
+        model: def?.model?.split("/").pop(),
+      });
+    }
+    updatePanel(ctx);
+
     // Lock down to orchestrator-only tools.
     pi.setActiveTools(["dispatch_agent", "manage_tasks"]);
 
@@ -847,7 +1121,7 @@ ${agentCatalog()}`,
 
   // ── Session Shutdown ───────────────────────
 
-  pi.on("session_shutdown", async () => {
+  pi.on("session_shutdown", async (_event, ctx) => {
     if (currentRun && currentRun.status === "running") {
       // Check if all tasks are done.
       const tasks = listTasks(currentRunDir);
@@ -855,5 +1129,9 @@ ${agentCatalog()}`,
       const newStatus = allDone ? "completed" : "interrupted";
       updateRunStatus(projectCwd, activeTeamName, currentRun.runId, newStatus);
     }
+
+    // Stop the panel timer and remove the panel widget on shutdown.
+    stopPanelTimer();
+    ctx.ui.setWidget("agent-team-panel", undefined);
   });
 }
