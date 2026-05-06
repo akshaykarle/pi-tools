@@ -25,6 +25,7 @@
     "build": "tsc",
     "test": "vitest run",
     "test:watch": "vitest",
+    "tui": "npx tsx scripts/team-tui.ts",
     "prepublishOnly": "npm run build && npm test"
   },
   "peerDependencies": {
@@ -36,6 +37,7 @@
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
+    "tsx": "^4.0.0",
     "typescript": "^6.0.3",
     "vitest": "^4.1.5"
   },
@@ -43,7 +45,8 @@
   "files": [
     "dist/",
     "extensions/",
-    "skills/"
+    "skills/",
+    "scripts/"
   ],
   "publishConfig": {
     "access": "public"
