@@ -1,4 +1,4 @@
-// Git Worktree — manage git worktrees for isolated agent workspaces.
+// Git Worktree — manage git worktrees for isolated workspaces.
 //
 // Provides create/remove/list operations and optional node_modules symlinking.
 
@@ -76,7 +76,7 @@ export function createWorktree(
   },
 ): CreateWorktreeResult {
   const baseDir = opts?.baseDir ?? join(repoRoot, ".worktrees");
-  const branchName = `agent-teams/${sanitizeBranchPart(name)}`;
+  const branchName = `${sanitizeBranchPart(name)}`;
   const worktreePath = resolve(baseDir, sanitizeBranchPart(name));
   const baseBranch = opts?.baseBranch ?? "HEAD";
 

@@ -58,7 +58,7 @@ describe("create → list → switch flow", () => {
     createWorktree(repoDir, "my-feature");
     const found = findWorktreeByName(repoDir, "my-feature");
     expect(found).toBeDefined();
-    expect(found!.branch).toBe("agent-teams/my-feature");
+    expect(found!.branch).toBe("my-feature");
   });
 
   it("findWorktreeByName returns undefined for non-existent name", () => {

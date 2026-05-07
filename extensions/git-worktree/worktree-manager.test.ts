@@ -85,12 +85,12 @@ describe("isCleanWorkingTree", () => {
 describe("createWorktree / removeWorktree", () => {
   it("creates a worktree with a new branch", () => {
     const result = createWorktree(repoDir, "feature-test");
-    expect(result.branch).toBe("agent-teams/feature-test");
+    expect(result.branch).toBe("feature-test");
     expect(existsSync(result.path)).toBe(true);
 
     // Verify the branch exists.
     const branches = git(repoDir, ["branch", "--list"]);
-    expect(branches).toContain("agent-teams/feature-test");
+    expect(branches).toContain("feature-test");
   });
 
   it("removes a worktree and its branch", () => {
@@ -101,7 +101,7 @@ describe("createWorktree / removeWorktree", () => {
     expect(existsSync(result.path)).toBe(false);
 
     const branches = git(repoDir, ["branch", "--list"]);
-    expect(branches).not.toContain("agent-teams/to-remove");
+    expect(branches).not.toContain("to-remove");
   });
 });
 
@@ -119,7 +119,7 @@ describe("listWorktrees", () => {
     expect(worktrees).toHaveLength(2);
     const extra = worktrees.find((wt) => !wt.isMain);
     expect(extra).toBeDefined();
-    expect(extra!.branch).toBe("agent-teams/extra");
+    expect(extra!.branch).toBe("extra");
   });
 });
 
@@ -141,7 +141,7 @@ describe("findWorktreeByName", () => {
     createWorktree(repoDir, "my-feature");
     const found = findWorktreeByName(repoDir, "my-feature");
     expect(found).toBeDefined();
-    expect(found!.branch).toBe("agent-teams/my-feature");
+    expect(found!.branch).toBe("my-feature");
   });
 
   it("returns undefined for a non-existent name even when worktrees exist", () => {
@@ -165,7 +165,7 @@ describe("findWorktreeByName", () => {
     createWorktree(repoDir, "beta");
     const found = findWorktreeByName(repoDir, "beta");
     expect(found).toBeDefined();
-    expect(found!.branch).toBe("agent-teams/beta");
+    expect(found!.branch).toBe("beta");
     const notFound = findWorktreeByName(repoDir, "gamma");
     expect(notFound).toBeUndefined();
   });
