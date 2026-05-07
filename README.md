@@ -64,7 +64,7 @@ Bundled from [@plannotator/pi-extension](https://github.com/backnotprop/plannota
 Progressive-disclosure skills under `skills/`:
 
 - **`read-only`** — constrains an agent to read-only operations.
-- **`workspace-notes`** — instructs the agent to write working notes and output to its workspace directory.
+- **`workspace-notes`** — instructs the agent to track progress on the shared task board via `manage_tasks` (from `todos.ts`) and write a final summary to `output.md` in its workspace.
 
 Skills are listed in `package.json` under `pi.skills` and auto-discovered by child pi processes (see the agent-teams skill decision rule).
 
