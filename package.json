@@ -1,7 +1,7 @@
 {
   "name": "@akshaykarle/pi-tools",
-  "version": "0.1.0",
-  "description": "Pi coding agent extensions — security hardening, and more",
+  "version": "0.1.1",
+  "description": "Pi coding agent extensions — security hardening, agent teams and more",
   "keywords": [
     "pi-package"
   ],
