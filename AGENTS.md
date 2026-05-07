@@ -1,0 +1,82 @@
+# AGENTS.md
+
+This file provides guidance to AI coding assistants when working with code in this repository.
+
+## What this is
+
+`@akshaykarle/pi-tools` — a package of extensions and skills for the **pi coding agent** (`@mariozechner/pi-coding-agent`). Extensions are TypeScript modules that hook into pi's tool-call lifecycle; skills are progressive-disclosure markdown files. Published to npm as a `pi-package`.
+
+## Commands
+
+```bash
+npm run build          # tsc → dist/
+npm test               # vitest run
+npm run test:watch     # vitest interactive
+npx vitest run path/to/file.test.ts          # single test file
+npx vitest run -t "regex"                    # filter by test name
+npx tsc --noEmit       # type-check only (CI uses this)
+npm run tui            # launch agent-teams TUI dashboard (separate terminal)
+```
+
+Dev shell: `direnv allow` (uses `flake.nix`) or `nix develop`. Provides Node 22 + ts-language-server.
+
+CI (`.github/workflows/test.yml`) runs `npx tsc --noEmit` then `npm test` on Node 22. `publish.yml` fires on GitHub release with npm provenance.
+
+## Architecture
+
+### Extensions register against `ExtensionAPI`
+
+Each `extensions/*.ts` exports a default function `(pi: ExtensionAPI) => void`. The pi runtime calls it during session start, and the extension wires up:
+- `pi.on("tool_call" | "tool_result" | "session_start" | "session_shutdown" | "user_bash" | "before_agent_start", handler)` — lifecycle hooks
+- `pi.registerTool(...)`, `pi.registerCommand(...)`, `pi.registerFlag(...)` — capabilities
+- `pi.setActiveTools([...])` — narrow the toolset (used by orchestrator mode)
+
+Returning `{ block: true, reason }` from a `tool_call` hook vetoes the call.
+
+### Extensions in this package (registered in `package.json` → `pi.extensions`)
+
+| Extension | Role |
+|---|---|
+| `security.ts` | Defense-in-depth: hard-blocks destructive/exfil bash patterns, prompts to confirm sudo/chmod/force-push, redacts secret env-var values from tool output, flags prompt-injection markers in results. |
+| `sandbox.ts` | OS-level sandbox via `@anthropic-ai/sandbox-runtime` + in-process tool guard. Per-bash-call wrapping. Reads config from `.pi-${profile}/sandbox.json`. Adds `--no-sandbox` flag, `/sandbox` command. Helpers in `extensions/sandbox/`. |
+| `todos.ts` | `manage_tasks` tool over a JSON task board on disk. Active dir resolved via `setActiveTodosDir()` > `PI_TODO_PATH` > `.pi/todos/`. |
+| `agent-teams.ts` | Orchestrator mode — turns the pi session into a dispatcher. Registers `dispatch_agent`, narrows tools to orchestrator-only, spawns child pi processes per agent. |
+| `git-worktree.ts` | `/worktree` command + helpers re-exported for `agent-teams` worktree mode. |
+| `@plannotator/pi-extension` | Bundled via `bundledDependencies`. Interactive plan annotator. |
+
+### Agent-teams flow (most architecturally significant)
+
+The orchestrator pattern is the largest single piece of logic — read `extensions/agent-teams/README.md` for the full contract.
+
+```
+.pi/agents/*.md          # agent definitions (YAML frontmatter + system prompt body)
+.pi/agents/teams.yaml    # team membership + workspaceMode (shared|worktree) + maxConcurrency
+.pi/agent-teams/runs/<team>/<run-id>/
+    run.json
+    tasks.json           # shared board (manage_tasks writes here)
+    handoffs.{ndjson,md} # audit log of dispatch/completion/failure
+    workspaces/<agent>/  # session.json, notes.md, output.md
+```
+
+Key invariants:
+- Child agents are separate `pi` processes spawned by `agent-runner.ts`. They set `PI_AGENT_TEAMS_CHILD=1` so `agent-teams.ts` short-circuits and does not become a recursive orchestrator.
+- Skill resolution rule (decision matrix in `extensions/agent-teams/README.md`): if an agent's frontmatter sets `extensions:` (empty or list), pi runs with `--no-extensions` and package skill auto-discovery is suppressed — the agent must list every needed skill in `skills:`. If `extensions:` is absent, omit `skills:` entirely.
+- Worktree mode requires a clean working tree. Worktrees named `<runId>-<agentName>` (no `agent-teams/` prefix — see commit `31f6a00`).
+- `_activeTodosDir` module state in `todos.ts` is set by `agent-teams.ts` so `manage_tasks` writes into the run dir instead of `.pi/todos/`.
+
+### Sandbox precedence quirk
+
+`@anthropic-ai/sandbox-runtime` uses `allowRead > denyRead` but `denyWrite > allowWrite`. Our in-process tool guard (`extensions/sandbox/path-guard.ts`) uses `denyRead > allowRead` (safer). The OS layer behaves differently — accepted limitation, called out in `sandbox.ts` header.
+
+### Self-protection
+
+`security.ts` hard-blocks `rm`/`write`/`edit` against paths under `<agentDir>/agent/extensions/`, `settings.json`, `AGENTS.md`. The agent dir is derived from `getAgentDir()` (so `.pi-personal`, `.pi-sahaj`, `.pi-client` profile wrappers all work).
+
+## Conventions
+
+- Tests live next to source: `foo.ts` + `foo.test.ts`. Vitest excludes `node_modules`, `dist`, `.pi`, `.direnv`.
+- Module imports use `.js` extensions even from `.ts` (ESM bundler resolution; `tsconfig.json` `module: ES2022`, `moduleResolution: bundler`).
+- Internal helpers exposed for tests via a `__testing__` export object (see `sandbox.ts`).
+- `peerDependencies: @mariozechner/pi-coding-agent` — never import implementation details, only types/public API surface.
+- `.gitignore` excludes `.pi/agent-teams`, `.pi/plans`, `.pi/todos` — these are runtime state, not config.
+- Build artefacts (`*.js`, `*.d.ts`, `*.js.map`) are gitignored but published from `dist/` per `package.json files`.
