@@ -5,5 +5,5 @@ dist/
 *.js.map
 .direnv/
 .pi/agent-teams
-PLAN.md
-plans/
+.pi/plans
+.pi/todos

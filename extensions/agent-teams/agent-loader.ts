@@ -7,6 +7,7 @@ import type { AgentDefinition } from "./types.js";
 
 /** Expected frontmatter shape in agent `.md` files. */
 interface AgentFrontmatter {
+  [key: string]: unknown;
   name: string;
   description?: string;
   tools?: string;

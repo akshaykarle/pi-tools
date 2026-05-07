@@ -16,6 +16,7 @@ export interface MockUI {
 }
 
 export interface MockCtx {
+  [key: string]: unknown;
   ui: MockUI;
   hasUI: boolean;
   cwd: string;
