@@ -12,6 +12,7 @@
     "extensions": [
       "./extensions/security.ts",
       "./extensions/sandbox.ts",
+      "./extensions/todos.ts",
       "./extensions/agent-teams.ts",
       "./extensions/git-worktree.ts",
       "node_modules/@plannotator/pi-extension"

@@ -6,7 +6,8 @@ import {
   detectIncompleteRuns,
   formatIncompleteRunsSummary,
 } from "./crash-recovery.js";
-import type { RunState, Task } from "./types.js";
+import type { RunState } from "./types.js";
+import type { Task } from "../todos.js";
 
 let tmpDir: string;
 

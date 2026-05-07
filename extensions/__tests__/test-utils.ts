@@ -11,6 +11,7 @@ export interface MockUI {
   notify: ReturnType<typeof vi.fn>;
   setStatus: ReturnType<typeof vi.fn>;
   setWorkingMessage: ReturnType<typeof vi.fn>;
+  setWidget: ReturnType<typeof vi.fn>;
   theme: { fg: ReturnType<typeof vi.fn> };
 }
 
@@ -21,6 +22,7 @@ export interface MockCtx {
   signal: AbortSignal | undefined;
   isIdle: () => boolean;
   abort: () => void;
+  getActiveTools?: () => string[];
 }
 
 export function makeUI(opts?: { selectAnswer?: string | undefined }): MockUI {
@@ -31,6 +33,7 @@ export function makeUI(opts?: { selectAnswer?: string | undefined }): MockUI {
     notify: vi.fn(),
     setStatus: vi.fn(),
     setWorkingMessage: vi.fn(),
+    setWidget: vi.fn(),
     theme: { fg: vi.fn((_color: string, text: string) => text) },
   };
 }
@@ -43,6 +46,7 @@ export function makeCtx(overrides?: Partial<MockCtx>): MockCtx {
     signal: undefined,
     isIdle: () => true,
     abort: () => {},
+    getActiveTools: () => [],
     ...overrides,
   };
 }

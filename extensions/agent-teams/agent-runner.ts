@@ -126,7 +126,7 @@ export function buildAgentArgs(opts: Omit<SpawnAgentOptions, "onProgress" | "sig
  * with the agent's output, exit code, and elapsed time.
  */
 export function spawnAgent(opts: SpawnAgentOptions): Promise<AgentRunResult> {
-  const { cwd, onProgress, signal } = opts;
+  const { cwd, onProgress, signal, workspace } = opts;
   const args = buildAgentArgs(opts);
 
   const startTime = Date.now();
@@ -140,7 +140,7 @@ export function spawnAgent(opts: SpawnAgentOptions): Promise<AgentRunResult> {
         stdio: ["ignore", "pipe", "pipe"],
         // PI_AGENT_TEAMS_CHILD prevents agent-teams.ts from registering
         // orchestrator tools in the child process (recursion guard).
-        env: { ...process.env, PI_AGENT_TEAMS_CHILD: "1" },
+        env: { ...process.env, PI_AGENT_TEAMS_CHILD: "1", PI_TODO_PATH: workspace.root },
       });
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);

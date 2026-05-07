@@ -76,6 +76,8 @@ You are an implementer.
 }
 
 beforeEach(() => {
+  // Clear the child agent guard so the extension initializes properly
+  delete process.env.PI_AGENT_TEAMS_CHILD;
   tmpDir = mkdtempSync(join(tmpdir(), "agent-teams-ext-test-"));
   setupProject(tmpDir);
 });
@@ -87,19 +89,20 @@ afterEach(() => {
 function setup() {
   const mock = makeMockApi();
   extensionFactory(mock.api as unknown as Parameters<typeof extensionFactory>[0]);
+  mock.api.getAllTools.mockReturnValue([{ name: "dispatch_agent" }, { name: "manage_tasks" }]);
   return mock;
 }
 
 describe("agent-teams extension", () => {
-  it("registers dispatch_agent and manage_tasks tools", () => {
+  it("registers only dispatch_agent tool (manage_tasks is in todos extension)", () => {
     const mock = setup();
-    expect(mock.api.registerTool).toHaveBeenCalledTimes(2);
+    expect(mock.api.registerTool).toHaveBeenCalledTimes(1);
 
     const toolNames = mock.api.registerTool.mock.calls.map(
       (call: unknown[]) => (call[0] as { name: string }).name,
     );
     expect(toolNames).toContain("dispatch_agent");
-    expect(toolNames).toContain("manage_tasks");
+    expect(toolNames).not.toContain("manage_tasks");
   });
 
   it("registers team commands", () => {
@@ -154,7 +157,9 @@ describe("agent-teams extension", () => {
     expect(result?.systemPrompt).toContain("dispatch_agent");
   });
 
-  it("manage_tasks tool can add and list tasks", async () => {
+  it.skip("manage_tasks tool can add and list tasks", async () => {
+    // This test has been moved to extensions/todos/task-board.test.ts since manage_tasks
+    // is now registered by the todos extension, not agent-teams.
     const mock = setup();
     const ctx = makeCtx({ cwd: tmpDir });
     (ctx as Record<string, unknown>).model = { provider: "anthropic", id: "test-model" };

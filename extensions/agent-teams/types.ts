@@ -77,31 +77,6 @@ export interface TeamConfig {
   members: string[];
 }
 
-// ── Task Board ───────────────────────────────────
-
-export type TaskStatus = "queued" | "in-progress" | "done" | "failed";
-
-export interface Task {
-  /** Unique task ID (e.g. `task-1`). */
-  id: string;
-  /** Short title describing the task. */
-  title: string;
-  /** Detailed description / acceptance criteria. */
-  description: string;
-  /** Current status. */
-  status: TaskStatus;
-  /** Agent name assigned to this task (empty when queued). */
-  assignee: string;
-  /** Task IDs this task depends on (must be `done` before this can start). */
-  dependencies: string[];
-  /** Result summary written by the agent on completion. */
-  result: string;
-  /** ISO timestamp when the task was created. */
-  createdAt: string;
-  /** ISO timestamp of last status change. */
-  updatedAt: string;
-}
-
 // ── Handoff Log ──────────────────────────────────
 
 export type HandoffType = "dispatch" | "completion" | "failure" | "resume";

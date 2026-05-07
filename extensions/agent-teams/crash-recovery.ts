@@ -2,7 +2,8 @@
 
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import type { RunState, Task } from "./types.js";
+import type { RunState } from "./types.js";
+import type { Task } from "../todos.js";
 import { runsRoot } from "./run-manager.js";
 
 export interface IncompleteRun {
