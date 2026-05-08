@@ -44,7 +44,8 @@
   },
   "dependencies": {
     "@anthropic-ai/sandbox-runtime": "^0.0.50",
-    "@plannotator/pi-extension": "^0.19.10"
+    "@plannotator/pi-extension": "^0.19.10",
+    "zod": "^3.24.1"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
