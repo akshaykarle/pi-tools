@@ -9,3 +9,5 @@ dist/
 plans
 .pi/todos
 .pi/backlog
+coverage/
+coverage-baseline.md

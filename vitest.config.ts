@@ -6,4 +6,16 @@ export default defineConfig({
     exclude: ["node_modules/**", "dist/**", ".pi/**", ".direnv/**"],
     environment: "node",
   },
+  coverage: {
+    provider: "v8",
+    include: ["extensions/**/*.ts", "skills/**/*.ts"],
+    exclude: [
+      "**/*.test.ts",
+      "**/dist/**",
+      "**/node_modules/**",
+      "**/__snapshots__/**",
+      "**/__tests__/**",
+    ],
+    reporter: ["text", "lcov", "html"],
+  },
 });
