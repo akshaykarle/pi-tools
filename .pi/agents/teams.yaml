@@ -32,3 +32,13 @@ nano-team:
   maxConcurrency: 1
   members:
     - nano-worker
+
+backlog-runner:
+  description: "Product-loop team: competing teams evaluated by a read-only judge"
+  workspaceMode: worktree
+  maxConcurrency: 3
+  members:
+    - researcher
+    - implementer
+    - reviewer
+    - judge-default

@@ -10,20 +10,26 @@ interface AgentFrontmatter {
   [key: string]: unknown;
   name: string;
   description?: string;
-  tools?: string;
-  disallowedTools?: string;
+  tools?: string | string[];
+  disallowedTools?: string | string[];
   model?: string;
-  skills?: string;
-  extensions?: string;
+  skills?: string | string[];
+  extensions?: string | string[];
   plan?: string | boolean;
 }
 
 /**
- * Parse a comma-separated tool string into a trimmed array.
- * Returns undefined when the input is falsy.
+ * Parse a comma-separated tool string (or YAML-parsed string array) into a
+ * trimmed array.  Returns undefined when the input is falsy.
  */
-function parseToolList(raw: string | undefined): string[] | undefined {
-  if (!raw) return undefined;
+function parseToolList(raw: unknown): string[] | undefined {
+  if (raw === undefined || raw === null || raw === "") return undefined;
+  // YAML may already have parsed the value as an array.
+  if (Array.isArray(raw)) {
+    const result = raw.map((t) => String(t).trim()).filter(Boolean);
+    return result.length ? result : undefined;
+  }
+  if (typeof raw !== "string") return undefined;
   return raw
     .split(",")
     .map((t) => t.trim())
@@ -46,25 +52,23 @@ export function parseAgentFile(filePath: string): AgentDefinition | null {
 
   if (!frontmatter.name) return null;
 
-  const tools = parseToolList(frontmatter.tools as string | undefined);
-  const disallowedTools = parseToolList(
-    frontmatter.disallowedTools as string | undefined,
-  );
+  const tools = parseToolList(frontmatter.tools);
+  const disallowedTools = parseToolList(frontmatter.disallowedTools);
 
   if (tools && disallowedTools) {
     // Mutually exclusive — prefer tools (allowlist).
     return null;
   }
 
-  const skills = parseToolList(frontmatter.skills as string | undefined);
+  const skills = parseToolList(frontmatter.skills);
 
   // `extensions` is tri-state: undefined = absent (all extensions), [] = empty string
   // (--no-extensions), or a non-empty array (allowlist).
-  const rawExtensions = frontmatter.extensions as string | undefined;
+  const rawExtensions = frontmatter.extensions;
   const extensions: string[] | undefined =
     rawExtensions === undefined
       ? undefined                            // absent — all extensions load
-      : (parseToolList(rawExtensions) ?? []); // empty string → [], list → array
+      : (parseToolList(rawExtensions) ?? []); // empty string/[] → [], list → array
 
   // `plan` is true when the frontmatter value is the string 'true' or boolean true.
   const rawPlan = frontmatter.plan as string | boolean | undefined;

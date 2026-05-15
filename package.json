@@ -25,6 +25,7 @@
       "./extensions/todos.ts",
       "./extensions/agent-teams.ts",
       "./extensions/git-worktree.ts",
+      "./extensions/backlog-dashboard/index.ts",
       "node_modules/@plannotator/pi-extension"
     ],
     "skills": [
