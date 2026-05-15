@@ -80,3 +80,47 @@ Key invariants:
 - `peerDependencies: @mariozechner/pi-coding-agent` — never import implementation details, only types/public API surface.
 - `.gitignore` excludes `.pi/agent-teams`, `.pi/plans`, `.pi/todos` — these are runtime state, not config.
 - Build artefacts (`*.js`, `*.d.ts`, `*.js.map`) are gitignored but published from `dist/` per `package.json files`.
+
+## Picking up work from `.pi/backlog/`
+
+The backlog is a directory of task spec files — each `.md` is a mini-PRD with YAML frontmatter (machine-readable) and a markdown body (human-readable). Teams of agents pick up `ready` specs, implement them in competing git worktrees, and submit for evaluation by a judge agent. Full author and judge guide: `docs/agent-task-spec.md`.
+
+### Where specs live
+
+- Default location: `.pi/backlog/` (override with `PI_BACKLOG_DIR` env var — same precedence rule as `PI_TODO_PATH`)
+- Naming: `NNNN-slug.md`, e.g. `0001-rate-limiting.md`
+- Companion files auto-generated during a run:
+  - `NNNN-slug.attempts.jsonl` — append-only log, one row per competing submission
+  - `NNNN-slug.eval.json` — current ranked results + confidence score (regenerable)
+
+### Key frontmatter fields (agents must read these)
+
+| Field | What to check |
+|---|---|
+| `status` | Only pick up tasks where `status: ready` or `status: in-progress` |
+| `depends_on` | List of task IDs that must be `done` first; do not start if any are not |
+| `evaluation.mode` | `solo` (one agent) / `coordinated` (agents split the work) / `competitive` (agents implement independently, best wins) |
+| `evaluation.automated` | Commands the **orchestrator** runs after all implementations finish — not the implementing agent |
+| `evaluation.rubric` | Scoring criteria for the judge; if absent or empty, the judge falls back to assessing each AC |
+| `evaluation.budget` | `max_attempts` and `max_cost_usd` caps; orchestrator enforces these before each new dispatch round |
+
+### Implementer contract
+
+1. Read the full spec — `## Why`, `## What (scope)`, and `## Acceptance criteria` are the ground truth.
+2. Work only in your assigned worktree: `<repoRoot>/.worktrees/<agent>-<task-id>/`.
+3. Implement, then commit with a message referencing the task id (e.g. `feat(0001): add rate-limit guard`).
+4. Write `output.md` in your workspace: what you built, key decisions, self-assessment against each AC, any known gaps.
+5. Do **not** run `evaluation.automated` commands — the orchestrator does that after all implementers finish.
+
+### Judge contract
+
+1. Receive a task prompt from the orchestrator containing: spec path + a JSON manifest of candidates `{ agent, branch, worktree_path, output_md_path, automated_results }`.
+2. Use only `read`, `find`, `grep`, `ls` tools — no `bash`, no file writes of any kind.
+3. For any candidate where a `gate: true` automated check failed: mark `status: gated`, skip rubric scoring.
+4. If `evaluation.rubric` is defined: score each criterion 1–5 with a one-sentence justification.
+5. If `evaluation.rubric` is absent or empty: assess each `## Acceptance criteria` item against the implementation and produce a single `ac_satisfaction` score 1–5.
+6. Emit exactly one JSON object per candidate matching the `*.attempts.jsonl` schema — no prose outside the JSON.
+
+### Full guide
+
+`docs/agent-task-spec.md` — frontmatter field reference, the full orchestrator loop diagram, budget controls, confidence scoring via MAD, and worked examples of automated vs AC-fallback scoring.

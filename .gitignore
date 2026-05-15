@@ -6,4 +6,6 @@ dist/
 .direnv/
 .pi/agent-teams
 .pi/plans
+plans
 .pi/todos
+.pi/backlog
