@@ -9,6 +9,7 @@ import {
   effectiveStripList,
   loadConfig,
   sectionReplaceMerge,
+  toSrtRuntimeConfig,
   type SandboxConfig,
 } from "./config.js";
 
@@ -258,5 +259,99 @@ describe("DEFAULT_CONFIG shape guard", () => {
   it("frozen snapshot — alert on accidental edits", () => {
     // If this fails, review DEFAULT_CONFIG carefully and update the snapshot deliberately.
     expect(DEFAULT_CONFIG).toMatchSnapshot();
+  });
+});
+
+describe("readLayer — non-object JSON falls back to empty (line 103)", () => {
+  it("returns {} when file contains a JSON string (not an object)", () => {
+    // readLayer is private but exercised via loadConfig.
+    // A file containing a JSON scalar (string, number, null, array) should be
+    // treated as if empty — the layer contributes nothing.
+    writeJson(join(tmp, "sandbox.json"), "just-a-string");
+    const loaded = loadConfig(tmp);
+    // Should fall back to DEFAULT_CONFIG without crashing.
+    expect(loaded.network?.allowedDomains).toEqual(DEFAULT_CONFIG.network!.allowedDomains);
+  });
+
+  it("returns {} when file contains a JSON array", () => {
+    writeJson(join(tmp, "sandbox.json"), ["a", "b"]);
+    const loaded = loadConfig(tmp);
+    expect(loaded.filesystem?.denyRead).toEqual(DEFAULT_CONFIG.filesystem!.denyRead);
+  });
+
+  it("returns {} when file contains JSON null", () => {
+    writeJson(join(tmp, "sandbox.json"), null);
+    const loaded = loadConfig(tmp);
+    expect(loaded.enabled).toBe(DEFAULT_CONFIG.enabled);
+  });
+});
+
+describe("sectionReplaceMerge — weaker-sandbox flags (lines 123, 126)", () => {
+  it("enableWeakerNestedSandbox is propagated from override", () => {
+    const merged = sectionReplaceMerge(DEFAULT_CONFIG, { enableWeakerNestedSandbox: true });
+    expect(merged.enableWeakerNestedSandbox).toBe(true);
+  });
+
+  it("enableWeakerNetworkIsolation is propagated from override", () => {
+    const merged = sectionReplaceMerge(DEFAULT_CONFIG, { enableWeakerNetworkIsolation: true });
+    expect(merged.enableWeakerNetworkIsolation).toBe(true);
+  });
+
+  it("allowPty is propagated from override", () => {
+    const merged = sectionReplaceMerge(DEFAULT_CONFIG, { allowPty: true });
+    expect(merged.allowPty).toBe(true);
+  });
+
+  it("ignoreViolations is propagated from override", () => {
+    const violations: Record<string, string[]> = { network: ["domain-rule"] };
+    const merged = sectionReplaceMerge(DEFAULT_CONFIG, { ignoreViolations: violations });
+    expect(merged.ignoreViolations).toEqual(violations);
+  });
+});
+
+describe("toSrtRuntimeConfig — optional fields", () => {
+  it("includes ignoreViolations when set", () => {
+    const violations: Record<string, string[]> = { network: ["rule-1"] };
+    const config: SandboxConfig = { ...DEFAULT_CONFIG, ignoreViolations: violations };
+    const out = toSrtRuntimeConfig(config);
+    expect(out.ignoreViolations).toEqual(violations);
+  });
+
+  it("includes enableWeakerNestedSandbox when set", () => {
+    const config: SandboxConfig = { ...DEFAULT_CONFIG, enableWeakerNestedSandbox: true };
+    const out = toSrtRuntimeConfig(config);
+    expect(out.enableWeakerNestedSandbox).toBe(true);
+  });
+
+  it("includes enableWeakerNetworkIsolation when set", () => {
+    const config: SandboxConfig = { ...DEFAULT_CONFIG, enableWeakerNetworkIsolation: true };
+    const out = toSrtRuntimeConfig(config);
+    expect(out.enableWeakerNetworkIsolation).toBe(true);
+  });
+
+  it("includes allowPty when set", () => {
+    const config: SandboxConfig = { ...DEFAULT_CONFIG, allowPty: true };
+    const out = toSrtRuntimeConfig(config);
+    expect(out.allowPty).toBe(true);
+  });
+
+  it("omits optional fields when not set in config", () => {
+    const config: SandboxConfig = { ...DEFAULT_CONFIG };
+    delete config.ignoreViolations;
+    delete config.enableWeakerNestedSandbox;
+    delete config.enableWeakerNetworkIsolation;
+    delete config.allowPty;
+    const out = toSrtRuntimeConfig(config);
+    expect(out.ignoreViolations).toBeUndefined();
+    expect(out.enableWeakerNestedSandbox).toBeUndefined();
+    expect(out.enableWeakerNetworkIsolation).toBeUndefined();
+    expect(out.allowPty).toBeUndefined();
+  });
+
+  it("falls back to DEFAULT_CONFIG network+filesystem when config has none", () => {
+    const config: SandboxConfig = {};
+    const out = toSrtRuntimeConfig(config);
+    expect(out.network).toEqual(DEFAULT_CONFIG.network);
+    expect(out.filesystem).toEqual(DEFAULT_CONFIG.filesystem);
   });
 });

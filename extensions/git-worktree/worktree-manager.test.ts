@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -168,5 +168,52 @@ describe("findWorktreeByName", () => {
     expect(found!.branch).toBe("beta");
     const notFound = findWorktreeByName(repoDir, "gamma");
     expect(notFound).toBeUndefined();
+  });
+});
+
+describe("linkNodeModules", () => {
+  it("returns true and creates a symlink when source exists and target does not", () => {
+    // Create a source node_modules directory in repoDir.
+    const sourceNm = join(repoDir, "node_modules");
+    mkdirSync(sourceNm);
+
+    // Create a worktree to use as the target directory.
+    const wt = createWorktree(repoDir, "nm-link-test", { linkNodeModules: false });
+    const targetNm = join(wt.path, "node_modules");
+
+    expect(existsSync(targetNm)).toBe(false);
+    const result = linkNodeModules(repoDir, wt.path);
+    expect(result).toBe(true);
+    expect(existsSync(targetNm)).toBe(true);
+  });
+
+  it("returns false when target node_modules already exists", () => {
+    const sourceNm = join(repoDir, "node_modules");
+    mkdirSync(sourceNm);
+
+    const wt = createWorktree(repoDir, "nm-already-exists", { linkNodeModules: false });
+    const targetNm = join(wt.path, "node_modules");
+    // Pre-create the target so it already exists.
+    mkdirSync(targetNm);
+
+    const result = linkNodeModules(repoDir, wt.path);
+    expect(result).toBe(false);
+    // The existing directory should be untouched.
+    expect(existsSync(targetNm)).toBe(true);
+  });
+});
+
+describe("removeWorktree — branch deletion edge cases", () => {
+  it("removes worktree even when deleteBranch:false (branch is preserved)", () => {
+    const wt = createWorktree(repoDir, "keep-branch");
+    removeWorktree(repoDir, wt.path, { force: true, deleteBranch: false });
+
+    expect(existsSync(wt.path)).toBe(false);
+    // Branch should still exist since we opted out of deletion.
+    const branches = git(repoDir, ["branch", "--list"]);
+    expect(branches).toContain("keep-branch");
+
+    // Clean up the leftover branch.
+    git(repoDir, ["branch", "-D", "keep-branch"]);
   });
 });

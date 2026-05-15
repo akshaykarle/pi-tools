@@ -759,4 +759,122 @@ describe("/sandbox slash command", () => {
     expect(call[1].description).toMatch(/off/);
     expect(call[1].description).toMatch(/\bon\b/);
   });
+
+  it("reload: notifies 'not initialized' warning when sandbox was disabled", async () => {
+    vi.stubEnv("PI_CODING_AGENT_DIR", "/h/.pi-test");
+    const mock = setup({ noSandbox: true });
+    await mock.invoke.sessionStart(makeCtx({ cwd: tmp }));
+
+    expect(__testing__.state().sandboxInitialized).toBe(false);
+
+    const ctx = makeCtx({ cwd: tmp });
+    await mock.invoke.sandboxCommand("reload", ctx);
+
+    expect(ctx.ui.notify).toHaveBeenCalledWith(
+      expect.stringMatching(/not initialized/i),
+      "warning",
+    );
+    // updateConfig must NOT be called since sandbox is not initialized.
+    expect(updateConfigMock).not.toHaveBeenCalled();
+  });
+
+  it("reload: notifies error when SandboxManager.updateConfig throws", async () => {
+    vi.stubEnv("PI_CODING_AGENT_DIR", "/h/.pi-test");
+    const mock = setup();
+    await mock.invoke.sessionStart(makeCtx({ cwd: tmp }));
+
+    updateConfigMock.mockImplementationOnce(() => {
+      throw new Error("policy update failed");
+    });
+
+    const ctx = makeCtx({ cwd: tmp });
+    await mock.invoke.sandboxCommand("reload", ctx);
+
+    expect(ctx.ui.notify).toHaveBeenCalledWith(
+      expect.stringMatching(/Reload failed.*policy update failed/i),
+      "error",
+    );
+  });
+
+  it("on (isSupportedPlatform=false, not yet initialized): enables tool guard but skips OS init", async () => {
+    vi.stubEnv("PI_CODING_AGENT_DIR", "/h/.pi-test");
+    isSupportedPlatformMock.mockReturnValue(false);
+
+    // Use noSandbox so session_start doesn't try to initialize.
+    const mock = setup({ noSandbox: true });
+    await mock.invoke.sessionStart(makeCtx({ cwd: tmp }));
+
+    // Re-stub platform check for the /sandbox on attempt.
+    isSupportedPlatformMock.mockReturnValue(false);
+
+    const ctx = makeCtx({ cwd: tmp });
+    await mock.invoke.sandboxCommand("on", ctx);
+
+    // Should notify that OS sandbox is not supported, but tool guard enabled.
+    expect(ctx.ui.notify).toHaveBeenCalledWith(
+      expect.stringMatching(/not supported.*tool guard/i),
+      "warning",
+    );
+    expect(initializeMock).not.toHaveBeenCalled();
+  });
+
+  it("validate: reports 'not present' for both layers when neither config exists", async () => {
+    vi.stubEnv("PI_CODING_AGENT_DIR", "/h/.pi-test");
+    const mock = setup();
+    await mock.invoke.sessionStart(makeCtx({ cwd: tmp }));
+
+    // Ensure no sandbox.json files exist.
+    const ctx = makeCtx({ cwd: tmp });
+    await mock.invoke.sandboxCommand("validate", ctx);
+    const msg = (ctx.ui.notify.mock.calls[0]?.[0] ?? "") as string;
+    expect(msg).toContain("not present (defaults apply)");
+  });
+});
+
+describe("enabled:false config path", () => {
+  it("session_start with enabled:false disables sandbox and notifies", async () => {
+    vi.stubEnv("PI_CODING_AGENT_DIR", "/h/.pi-test");
+    mkdirSync(join(tmp, ".pi"), { recursive: true });
+    writeFileSync(join(tmp, ".pi", "sandbox.json"), JSON.stringify({ enabled: false }));
+
+    const mock = setup();
+    const ctx = makeCtx({ cwd: tmp });
+    await mock.invoke.sessionStart(ctx);
+
+    expect(initializeMock).not.toHaveBeenCalled();
+    expect(__testing__.state().sandboxEnabled).toBe(false);
+    expect(__testing__.state().toolGuardEnabled).toBe(false);
+    expect(ctx.ui.notify).toHaveBeenCalledWith(
+      "Sandbox disabled via config (enabled:false)",
+      "info",
+    );
+  });
+
+  it("enabled:false: user_bash returns undefined (no sandboxed bash)", async () => {
+    vi.stubEnv("PI_CODING_AGENT_DIR", "/h/.pi-test");
+    mkdirSync(join(tmp, ".pi"), { recursive: true });
+    writeFileSync(join(tmp, ".pi", "sandbox.json"), JSON.stringify({ enabled: false }));
+
+    const mock = setup();
+    await mock.invoke.sessionStart(makeCtx({ cwd: tmp }));
+
+    const result = await mock.invoke.userBash({}, makeCtx());
+    expect(result).toBeUndefined();
+  });
+
+  it("enabled:false: tool_call returns undefined (tool guard off)", async () => {
+    vi.stubEnv("PI_CODING_AGENT_DIR", "/h/.pi-test");
+    mkdirSync(join(tmp, ".pi"), { recursive: true });
+    writeFileSync(join(tmp, ".pi", "sandbox.json"), JSON.stringify({ enabled: false }));
+
+    const mock = setup();
+    await mock.invoke.sessionStart(makeCtx({ cwd: tmp }));
+
+    const result = await mock.invoke.toolCall(
+      { toolName: "read", input: { path: "/etc/passwd" } },
+      makeCtx({ cwd: tmp }),
+    );
+    // Tool guard is off → should pass through (return undefined, not block).
+    expect(result).toBeUndefined();
+  });
 });

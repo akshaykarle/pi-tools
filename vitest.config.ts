@@ -17,5 +17,13 @@ export default defineConfig({
       "**/__tests__/**",
     ],
     reporter: ["text", "lcov", "html"],
+    thresholds: {
+      // Enforce minimum coverage for the extensions/ directory.
+      // These are set at the agreed minimums; do not lower them.
+      "extensions/**/*.ts": {
+        statements: 75,
+        branches: 65,
+      },
+    },
   },
 });

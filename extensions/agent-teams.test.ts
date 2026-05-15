@@ -338,3 +338,385 @@ describe("team-off", () => {
     expect(after.status).toBe("interrupted");
   });
 });
+
+describe("team-list command", () => {
+  it("notifies 'no agents loaded' when team is not active", async () => {
+    vi.resetModules();
+    const { default: freshFactory } = await import("./agent-teams.js");
+    const mock = makeMockApi();
+    freshFactory(mock.api as unknown as Parameters<typeof freshFactory>[0]);
+
+    const call = mock.api.registerCommand.mock.calls.find(
+      (c: unknown[]) => c[0] === "team-list",
+    );
+    const handler = call![1].handler as (_: string, ctx: unknown) => Promise<void>;
+    const ctx = makeCtx({ cwd: tmpDir });
+    await handler("", ctx);
+
+    expect(ctx.ui.notify).toHaveBeenCalledWith(
+      expect.stringMatching(/no agents loaded/i),
+      "warning",
+    );
+  });
+
+  it("lists agents when team is active", async () => {
+    const mock = setup();
+    const ctx = makeCtx({ cwd: tmpDir });
+    (ctx as Record<string, unknown>).model = { provider: "anthropic", id: "test-model" };
+    (ctx as Record<string, unknown>).getActiveTools = () => [];
+    await mock.invoke.sessionStart(ctx);
+
+    const call = mock.api.registerCommand.mock.calls.find(
+      (c: unknown[]) => c[0] === "team-list",
+    );
+    const handler = call![1].handler as (_: string, ctx: unknown) => Promise<void>;
+    await handler("", ctx);
+
+    // Should have notified with agent info.
+    const notifyCalls = (ctx.ui.notify as ReturnType<typeof vi.fn>).mock.calls;
+    const lastNotify = notifyCalls[notifyCalls.length - 1]?.[0] as string;
+    expect(lastNotify).toContain("Researcher");
+    expect(lastNotify).toContain("Implementer");
+  });
+});
+
+describe("team-status command", () => {
+  it("notifies 'no active run' when no run is started", async () => {
+    vi.resetModules();
+    const { default: freshFactory } = await import("./agent-teams.js");
+    const mock = makeMockApi();
+    freshFactory(mock.api as unknown as Parameters<typeof freshFactory>[0]);
+
+    const call = mock.api.registerCommand.mock.calls.find(
+      (c: unknown[]) => c[0] === "team-status",
+    );
+    const handler = call![1].handler as (_: string, ctx: unknown) => Promise<void>;
+    const ctx = makeCtx({ cwd: tmpDir });
+    await handler("", ctx);
+
+    expect(ctx.ui.notify).toHaveBeenCalledWith(
+      expect.stringMatching(/no active run/i),
+      "info",
+    );
+  });
+
+  it("shows run information when run is active", async () => {
+    const mock = setup();
+    const ctx = makeCtx({ cwd: tmpDir });
+    (ctx as Record<string, unknown>).model = { provider: "anthropic", id: "test-model" };
+    (ctx as Record<string, unknown>).getActiveTools = () => [];
+    await mock.invoke.sessionStart(ctx);
+
+    const call = mock.api.registerCommand.mock.calls.find(
+      (c: unknown[]) => c[0] === "team-status",
+    );
+    const handler = call![1].handler as (_: string, ctx: unknown) => Promise<void>;
+    await handler("", ctx);
+
+    const notifyCalls = (ctx.ui.notify as ReturnType<typeof vi.fn>).mock.calls;
+    const lastNotify = notifyCalls[notifyCalls.length - 1]?.[0] as string;
+    expect(lastNotify).toContain("Run:");
+    expect(lastNotify).toContain("test-team");
+  });
+
+  it("shows tasks with correct status icons", async () => {
+    const mock = setup();
+    const ctx = makeCtx({ cwd: tmpDir });
+    (ctx as Record<string, unknown>).model = { provider: "anthropic", id: "test-model" };
+    (ctx as Record<string, unknown>).getActiveTools = () => [];
+    await mock.invoke.sessionStart(ctx);
+
+    // Add tasks with different statuses to the run directory.
+    const { readdirSync } = await import("node:fs");
+    const runsDir = join(tmpDir, ".pi", "agent-teams", "runs", "test-team");
+    const runDirs = readdirSync(runsDir);
+    const runDirPath = join(runsDir, runDirs[0]);
+
+    const { addTask, updateTask } = await import("./todos.js");
+    const t1 = addTask(runDirPath, { title: "Done task", description: "d", dependencies: [] });
+    updateTask(runDirPath, t1.id, { status: "done" });
+    const t2 = addTask(runDirPath, { title: "Failed task", description: "d", dependencies: [] });
+    updateTask(runDirPath, t2.id, { status: "failed" });
+    const t3 = addTask(runDirPath, { title: "Active task", description: "d", dependencies: [] });
+    updateTask(runDirPath, t3.id, { status: "in-progress" });
+    addTask(runDirPath, { title: "Queued task", description: "d", dependencies: [] });
+
+    const call = mock.api.registerCommand.mock.calls.find(
+      (c: unknown[]) => c[0] === "team-status",
+    );
+    const handler = call![1].handler as (_: string, ctx: unknown) => Promise<void>;
+    await handler("", ctx);
+
+    const notifyCalls = (ctx.ui.notify as ReturnType<typeof vi.fn>).mock.calls;
+    const lastNotify = notifyCalls[notifyCalls.length - 1]?.[0] as string;
+    expect(lastNotify).toContain("✅");
+    expect(lastNotify).toContain("❌");
+    expect(lastNotify).toContain("🔄");
+    expect(lastNotify).toContain("⏳");
+  });
+});
+
+describe("team-handoffs command", () => {
+  it("notifies 'no active run' when run dir is not set", async () => {
+    vi.resetModules();
+    const { default: freshFactory } = await import("./agent-teams.js");
+    const mock = makeMockApi();
+    freshFactory(mock.api as unknown as Parameters<typeof freshFactory>[0]);
+
+    const call = mock.api.registerCommand.mock.calls.find(
+      (c: unknown[]) => c[0] === "team-handoffs",
+    );
+    const handler = call![1].handler as (_: string, ctx: unknown) => Promise<void>;
+    const ctx = makeCtx({ cwd: tmpDir });
+    await handler("", ctx);
+
+    expect(ctx.ui.notify).toHaveBeenCalledWith(
+      expect.stringMatching(/no active run/i),
+      "info",
+    );
+  });
+
+  it("shows 'no handoffs yet' when run is active but log is empty", async () => {
+    const mock = setup();
+    const ctx = makeCtx({ cwd: tmpDir });
+    (ctx as Record<string, unknown>).model = { provider: "anthropic", id: "test-model" };
+    (ctx as Record<string, unknown>).getActiveTools = () => [];
+    await mock.invoke.sessionStart(ctx);
+
+    const call = mock.api.registerCommand.mock.calls.find(
+      (c: unknown[]) => c[0] === "team-handoffs",
+    );
+    const handler = call![1].handler as (_: string, ctx: unknown) => Promise<void>;
+    await handler("", ctx);
+
+    const notifyCalls = (ctx.ui.notify as ReturnType<typeof vi.fn>).mock.calls;
+    const lastNotify = notifyCalls[notifyCalls.length - 1]?.[0] as string;
+    expect(lastNotify).toMatch(/no handoffs/i);
+  });
+});
+
+describe("session_start — no agents found", () => {
+  it("notifies 'no agents found' when agents directory is empty", async () => {
+    vi.resetModules();
+    const tmpDirEmpty = mkdtempSync(join(tmpdir(), "agent-teams-empty-"));
+    // Create team dir but no agent definitions.
+    mkdirSync(join(tmpDirEmpty, ".pi", "agents"), { recursive: true });
+    writeFileSync(
+      join(tmpDirEmpty, ".pi", "agents", "teams.yaml"),
+      `test-team:
+  description: "Empty team"
+  workspaceMode: shared
+  maxConcurrency: 1
+  members: []
+`,
+    );
+
+    try {
+      const { default: freshFactory } = await import("./agent-teams.js");
+      const mock = makeMockApi();
+      freshFactory(mock.api as unknown as Parameters<typeof freshFactory>[0]);
+
+      const ctx = makeCtx({ cwd: tmpDirEmpty });
+      (ctx as Record<string, unknown>).model = { provider: "anthropic", id: "test-model" };
+      (ctx as Record<string, unknown>).getActiveTools = () => [];
+      await mock.invoke.sessionStart(ctx);
+
+      // Should notify about no agents.
+      const notifyCalls = (ctx.ui.notify as ReturnType<typeof vi.fn>).mock.calls;
+      const msgs = notifyCalls.map((c: unknown[]) => c[0] as string);
+      expect(msgs.some((m) => m.includes("No agents found"))).toBe(true);
+    } finally {
+      rmSync(tmpDirEmpty, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("team-handoffs — with handoffs", () => {
+  it("shows handoff entries when they exist", async () => {
+    const mock = setup();
+    const ctx = makeCtx({ cwd: tmpDir });
+    (ctx as Record<string, unknown>).model = { provider: "anthropic", id: "test-model" };
+    (ctx as Record<string, unknown>).getActiveTools = () => [];
+    await mock.invoke.sessionStart(ctx);
+
+    // Get the run directory and write a handoff entry.
+    const { readdirSync } = await import("node:fs");
+    const runsDir = join(tmpDir, ".pi", "agent-teams", "runs", "test-team");
+    const runDirs = readdirSync(runsDir);
+    const runDirPath = join(runsDir, runDirs[0]);
+
+    const { appendHandoff } = await import("./agent-teams/handoff-log.js");
+    appendHandoff(runDirPath, {
+      type: "dispatch",
+      runId: runDirs[0],
+      fromAgent: "orchestrator",
+      toAgent: "researcher",
+      taskId: "task-1",
+      summary: "Research the codebase",
+      elapsedMs: 5000,
+    });
+
+    const call = mock.api.registerCommand.mock.calls.find(
+      (c: unknown[]) => c[0] === "team-handoffs",
+    );
+    const handler = call![1].handler as (_: string, ctx: unknown) => Promise<void>;
+    await handler("", ctx);
+
+    const notifyCalls = (ctx.ui.notify as ReturnType<typeof vi.fn>).mock.calls;
+    const lastNotify = notifyCalls[notifyCalls.length - 1]?.[0] as string;
+    expect(lastNotify).toContain("researcher");
+    expect(lastNotify).toContain("Research the codebase");
+  });
+
+  it("shows correct icons for completion/failure/other handoff types and truncates long summaries", async () => {
+    const mock = setup();
+    const ctx = makeCtx({ cwd: tmpDir });
+    (ctx as Record<string, unknown>).model = { provider: "anthropic", id: "test-model" };
+    (ctx as Record<string, unknown>).getActiveTools = () => [];
+    await mock.invoke.sessionStart(ctx);
+
+    const { readdirSync } = await import("node:fs");
+    const runsDir = join(tmpDir, ".pi", "agent-teams", "runs", "test-team");
+    const runDirs = readdirSync(runsDir);
+    const runDirPath = join(runsDir, runDirs[0]);
+
+    const { appendHandoff } = await import("./agent-teams/handoff-log.js");
+    const runId = runDirs[0];
+    appendHandoff(runDirPath, { type: "completion", runId, fromAgent: "researcher", toAgent: "orchestrator", taskId: "t1", summary: "Done" });
+    appendHandoff(runDirPath, { type: "failure", runId, fromAgent: "implementer", toAgent: "orchestrator", taskId: "t2", summary: "Failed" });
+    // 'other' type (not dispatch/completion/failure) triggers the else branch.
+    appendHandoff(runDirPath, { type: "update" as "dispatch", runId, fromAgent: "a", toAgent: "b", taskId: "t3", summary: "x".repeat(110) });
+
+    const call = mock.api.registerCommand.mock.calls.find(
+      (c: unknown[]) => c[0] === "team-handoffs",
+    );
+    const handler = call![1].handler as (_: string, ctx: unknown) => Promise<void>;
+    await handler("", ctx);
+
+    const notifyCalls = (ctx.ui.notify as ReturnType<typeof vi.fn>).mock.calls;
+    const lastNotify = notifyCalls[notifyCalls.length - 1]?.[0] as string;
+    // Completion icon.
+    expect(lastNotify).toContain("✅");
+    // Failure icon.
+    expect(lastNotify).toContain("❌");
+    // Long summary truncated.
+    expect(lastNotify).toContain("...");
+  });
+});
+
+describe("session_shutdown", () => {
+  it("marks run as 'completed' when all tasks are done on shutdown", async () => {
+    const mock = setup();
+    const ctx = makeCtx({ cwd: tmpDir });
+    (ctx as Record<string, unknown>).model = { provider: "anthropic", id: "test-model" };
+    (ctx as Record<string, unknown>).getActiveTools = () => [];
+
+    await mock.invoke.sessionStart(ctx);
+
+    // Find the run directory.
+    const { readdirSync } = await import("node:fs");
+    const runsDir = join(tmpDir, ".pi", "agent-teams", "runs", "test-team");
+    const runDirs = readdirSync(runsDir);
+    const runDirPath = join(runsDir, runDirs[0]);
+
+    // Add a task and mark it done so allDone is true.
+    const { addTask, updateTask } = await import("./todos.js");
+    const task = addTask(runDirPath, { title: "T", description: "d", dependencies: [] });
+    updateTask(runDirPath, task.id, { status: "done" });
+
+    // Find and invoke the session_shutdown handler.
+    const shutdownCalls = mock.api.on.mock.calls.filter(
+      (c: unknown[]) => c[0] === "session_shutdown",
+    );
+    const shutdownHandler = shutdownCalls[0][1] as (e: unknown, ctx: unknown) => Promise<void>;
+    await shutdownHandler({}, ctx);
+
+    const runJsonPath = join(runDirPath, "run.json");
+    const runJson = JSON.parse(readFileSync(runJsonPath, "utf-8"));
+    expect(runJson.status).toBe("completed");
+  });
+
+  it("marks run as 'interrupted' when tasks are still in progress on shutdown", async () => {
+    const mock = setup();
+    const ctx = makeCtx({ cwd: tmpDir });
+    (ctx as Record<string, unknown>).model = { provider: "anthropic", id: "test-model" };
+    (ctx as Record<string, unknown>).getActiveTools = () => [];
+
+    await mock.invoke.sessionStart(ctx);
+
+    const { readdirSync } = await import("node:fs");
+    const runsDir = join(tmpDir, ".pi", "agent-teams", "runs", "test-team");
+    const runDirs = readdirSync(runsDir);
+    const runDirPath = join(runsDir, runDirs[0]);
+
+    // Add a queued task (not done) — allDone will be false.
+    const { addTask } = await import("./todos.js");
+    addTask(runDirPath, { title: "Pending", description: "d", dependencies: [] });
+
+    const shutdownCalls = mock.api.on.mock.calls.filter(
+      (c: unknown[]) => c[0] === "session_shutdown",
+    );
+    const shutdownHandler = shutdownCalls[0][1] as (e: unknown, ctx: unknown) => Promise<void>;
+    await shutdownHandler({}, ctx);
+
+    const runJsonPath = join(runDirPath, "run.json");
+    const runJson = JSON.parse(readFileSync(runJsonPath, "utf-8"));
+    expect(runJson.status).toBe("interrupted");
+  });
+});
+
+describe("dispatch_agent tool", () => {
+  it("returns error text when agent name is not found in the team", async () => {
+    const mock = setup();
+    const ctx = makeCtx({ cwd: tmpDir });
+    (ctx as Record<string, unknown>).model = { provider: "anthropic", id: "test-model" };
+    (ctx as Record<string, unknown>).getActiveTools = () => [];
+    await mock.invoke.sessionStart(ctx);
+
+    const toolCall = mock.api.registerTool.mock.calls.find(
+      (c: unknown[]) => (c[0] as { name: string }).name === "dispatch_agent",
+    );
+    const execute = (toolCall![0] as { execute: Function }).execute;
+
+    const result = await execute(
+      "call-1",
+      { agent: "nonexistent-agent", taskId: "task-1", task: "do something" },
+      undefined,
+      undefined,
+      ctx,
+    );
+
+    expect(result.content[0].text).toContain("not found");
+    expect(result.details.status).toBe("error");
+  });
+
+  it("dispatch_agent calls onUpdate with dispatching status", async () => {
+    const mock = setup();
+    const ctx = makeCtx({ cwd: tmpDir });
+    (ctx as Record<string, unknown>).model = { provider: "anthropic", id: "test-model" };
+    (ctx as Record<string, unknown>).getActiveTools = () => [];
+    await mock.invoke.sessionStart(ctx);
+
+    const toolCall = mock.api.registerTool.mock.calls.find(
+      (c: unknown[]) => (c[0] as { name: string }).name === "dispatch_agent",
+    );
+    const execute = (toolCall![0] as { execute: Function }).execute;
+
+    const updates: unknown[] = [];
+    const onUpdate = (u: unknown) => updates.push(u);
+
+    // researcher is a valid agent — it will fail because spawnMock returns early.
+    // That's fine; we just want to verify onUpdate was called.
+    await execute(
+      "call-2",
+      { agent: "researcher", taskId: "task-1", task: "do something" },
+      undefined,
+      onUpdate,
+      ctx,
+    );
+
+    expect(updates.length).toBeGreaterThan(0);
+    const first = updates[0] as { content: Array<{ text: string }> };
+    expect(first.content[0].text).toContain("Dispatching");
+  });
+});
