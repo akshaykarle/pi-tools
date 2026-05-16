@@ -1,8 +1,8 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync, readFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { makeMockApi, makeCtx } from "./__tests__/test-utils.js";
+import { makeMockApi, makeCtx, makeUI } from "./__tests__/test-utils.js";
 
 // Mock parseFrontmatter (same as agent-loader test).
 vi.mock("@mariozechner/pi-coding-agent", () => ({
@@ -208,7 +208,6 @@ describe("agent-teams extension", () => {
     expect(existsSync(runsDir)).toBe(true);
 
     // Should have exactly one run directory.
-    const { readdirSync } = await import("node:fs");
     const runDirs = readdirSync(runsDir);
     expect(runDirs).toHaveLength(1);
     expect(runDirs[0]).toMatch(/^run-\d+-[a-f0-9]+$/);
@@ -321,7 +320,6 @@ describe("team-off", () => {
     const teamOffHandler = call![1].handler as (_args: string, ctx: unknown) => Promise<void>;
 
     // Find the run directory created on disk.
-    const { readdirSync } = await import("node:fs");
     const runsDir = join(tmpDir2, ".pi", "agent-teams", "runs", "test-team");
     const runDirs = readdirSync(runsDir);
     expect(runDirs).toHaveLength(1);
@@ -427,7 +425,6 @@ describe("team-status command", () => {
     await mock.invoke.sessionStart(ctx);
 
     // Add tasks with different statuses to the run directory.
-    const { readdirSync } = await import("node:fs");
     const runsDir = join(tmpDir, ".pi", "agent-teams", "runs", "test-team");
     const runDirs = readdirSync(runsDir);
     const runDirPath = join(runsDir, runDirs[0]);
@@ -540,7 +537,6 @@ describe("team-handoffs — with handoffs", () => {
     await mock.invoke.sessionStart(ctx);
 
     // Get the run directory and write a handoff entry.
-    const { readdirSync } = await import("node:fs");
     const runsDir = join(tmpDir, ".pi", "agent-teams", "runs", "test-team");
     const runDirs = readdirSync(runsDir);
     const runDirPath = join(runsDir, runDirs[0]);
@@ -575,7 +571,6 @@ describe("team-handoffs — with handoffs", () => {
     (ctx as Record<string, unknown>).getActiveTools = () => [];
     await mock.invoke.sessionStart(ctx);
 
-    const { readdirSync } = await import("node:fs");
     const runsDir = join(tmpDir, ".pi", "agent-teams", "runs", "test-team");
     const runDirs = readdirSync(runsDir);
     const runDirPath = join(runsDir, runDirs[0]);
@@ -614,7 +609,6 @@ describe("session_shutdown", () => {
     await mock.invoke.sessionStart(ctx);
 
     // Find the run directory.
-    const { readdirSync } = await import("node:fs");
     const runsDir = join(tmpDir, ".pi", "agent-teams", "runs", "test-team");
     const runDirs = readdirSync(runsDir);
     const runDirPath = join(runsDir, runDirs[0]);
@@ -644,7 +638,6 @@ describe("session_shutdown", () => {
 
     await mock.invoke.sessionStart(ctx);
 
-    const { readdirSync } = await import("node:fs");
     const runsDir = join(tmpDir, ".pi", "agent-teams", "runs", "test-team");
     const runDirs = readdirSync(runsDir);
     const runDirPath = join(runsDir, runDirs[0]);
@@ -718,5 +711,320 @@ describe("dispatch_agent tool", () => {
     expect(updates.length).toBeGreaterThan(0);
     const first = updates[0] as { content: Array<{ text: string }> };
     expect(first.content[0].text).toContain("Dispatching");
+  });
+});
+
+// ─── Helpers shared by multi-team tests ──────────────────────────────────────
+
+/**
+ * Write a two-team project layout into `dir` and return the registered
+ * team-select command handler (extracted after registering the extension).
+ */
+async function setupMultiTeamProject(dir: string): Promise<{
+  mock: ReturnType<typeof makeMockApi>;
+  handler: (_: string, ctx: unknown) => Promise<void>;
+  ctx: ReturnType<typeof makeCtx>;
+}> {
+  // Ensure a clean module instance for every test that uses this helper.
+  vi.resetModules();
+  mkdirSync(join(dir, ".pi", "agents"), { recursive: true });
+
+  writeFileSync(
+    join(dir, ".pi", "agents", "researcher.md"),
+    `---\nname: researcher\ndescription: Research agent\ntools: read,grep\n---\nYou are a researcher.\n`,
+  );
+
+  writeFileSync(
+    join(dir, ".pi", "agents", "teams.yaml"),
+    `alpha-team:\n  description: "First team"\n  workspaceMode: shared\n  maxConcurrency: 1\n  members:\n    - researcher\nbeta-team:\n  description: "Second team"\n  workspaceMode: shared\n  maxConcurrency: 1\n  members:\n    - researcher\n`,
+  );
+
+  const mock = makeMockApi();
+  const { default: freshFactory } = await import("./agent-teams.js");
+  freshFactory(mock.api as unknown as Parameters<typeof freshFactory>[0]);
+  mock.api.getAllTools.mockReturnValue([{ name: "dispatch_agent" }, { name: "manage_tasks" }]);
+
+  const ctx = makeCtx({ cwd: dir });
+  (ctx as Record<string, unknown>).model = { provider: "anthropic", id: "test-model" };
+  await mock.invoke.sessionStart(ctx);
+
+  const call = mock.api.registerCommand.mock.calls.find(
+    (c: unknown[]) => c[0] === "team-select",
+  );
+  const handler = call![1].handler as (_: string, ctx: unknown) => Promise<void>;
+
+  return { mock, handler, ctx };
+}
+
+// ─── Step 5: multi-team team-select path correctness ─────────────────────────
+
+describe("team-select — multi-team run path", () => {
+  it("does NOT create a run on session_start when multiple teams exist", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "agent-teams-nodefer-"));
+    try {
+      const { ctx } = await setupMultiTeamProject(dir);
+      void ctx; // session_start already ran inside setupMultiTeamProject
+
+      // With >1 team loaded, no run directory should exist yet.
+      const runsRoot = join(dir, ".pi", "agent-teams", "runs");
+      expect(existsSync(runsRoot)).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("creates run under the selected team directory, not the auto-activated first team", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "agent-teams-selectpath-"));
+    try {
+      const { handler, ctx } = await setupMultiTeamProject(dir);
+
+      // Invoke /team-select and pick beta-team.
+      const selectCtx = makeCtx({ cwd: dir });
+      selectCtx.ui = makeUI({ selectAnswer: "beta-team — Second team (researcher)" });
+
+      await handler("", selectCtx);
+
+      // Run must be under beta-team.
+      const betaRunsDir = join(dir, ".pi", "agent-teams", "runs", "beta-team");
+      expect(existsSync(betaRunsDir)).toBe(true);
+
+      const runDirs = readdirSync(betaRunsDir);
+      expect(runDirs).toHaveLength(1);
+
+      const runJson = JSON.parse(
+        readFileSync(join(betaRunsDir, runDirs[0]!, "run.json"), "utf-8"),
+      );
+      expect(runJson.team).toBe("beta-team");
+      expect(runJson.status).toBe("running");
+
+      // alpha-team must have no runs at all.
+      const alphaRunsDir = join(dir, ".pi", "agent-teams", "runs", "alpha-team");
+      expect(existsSync(alphaRunsDir)).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("marks the previous run as interrupted when switching to a different team", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "agent-teams-interrupt-"));
+    try {
+      const { handler, ctx } = await setupMultiTeamProject(dir);
+
+      // First selection: alpha-team.
+      const alphaCtx = makeCtx({ cwd: dir });
+      alphaCtx.ui = makeUI({ selectAnswer: "alpha-team — First team (researcher)" });
+      await handler("", alphaCtx);
+
+      // Capture alpha run path.
+      const alphaRunsDir = join(dir, ".pi", "agent-teams", "runs", "alpha-team");
+      const alphaRunDirs = readdirSync(alphaRunsDir);
+      expect(alphaRunDirs).toHaveLength(1);
+      const alphaRunJsonPath = join(alphaRunsDir, alphaRunDirs[0]!, "run.json");
+
+      // Second selection: beta-team (confirm defaults to true in makeUI).
+      const betaCtx = makeCtx({ cwd: dir });
+      betaCtx.ui = makeUI({ selectAnswer: "beta-team — Second team (researcher)" });
+      await handler("", betaCtx);
+
+      // Alpha run must be interrupted.
+      const alphaRunJson = JSON.parse(readFileSync(alphaRunJsonPath, "utf-8"));
+      expect(alphaRunJson.status).toBe("interrupted");
+
+      // Beta run must exist and be running.
+      const betaRunsDir = join(dir, ".pi", "agent-teams", "runs", "beta-team");
+      const betaRunDirs = readdirSync(betaRunsDir);
+      expect(betaRunDirs).toHaveLength(1);
+      const betaRunJson = JSON.parse(
+        readFileSync(join(betaRunsDir, betaRunDirs[0]!, "run.json"), "utf-8"),
+      );
+      expect(betaRunJson.team).toBe("beta-team");
+      expect(betaRunJson.status).toBe("running");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+// ─── Step 6: confirmation warning before interrupting an active run ───────────
+
+describe("team-select — confirm dialog when active run exists", () => {
+  it("calls ctx.ui.confirm before switching teams when a run is active", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "agent-teams-confirmcall-"));
+    try {
+      const { handler, ctx } = await setupMultiTeamProject(dir);
+
+      // Select alpha-team to create an active run.
+      const alphaCtx = makeCtx({ cwd: dir });
+      alphaCtx.ui = makeUI({ selectAnswer: "alpha-team — First team (researcher)" });
+      await handler("", alphaCtx);
+
+      // Now try to switch to beta-team — confirm should be called.
+      const betaUI = makeUI({ selectAnswer: "beta-team — Second team (researcher)" });
+      const betaCtx = makeCtx({ cwd: dir });
+      betaCtx.ui = betaUI;
+      await handler("", betaCtx);
+
+      // confirm must have been invoked once.
+      expect(betaUI.confirm).toHaveBeenCalledTimes(1);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("cancelling the confirm leaves currentRun and run directory unchanged", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "agent-teams-cancelconfirm-"));
+    try {
+      const { handler, ctx } = await setupMultiTeamProject(dir);
+
+      // Select alpha-team first.
+      const alphaCtx = makeCtx({ cwd: dir });
+      alphaCtx.ui = makeUI({ selectAnswer: "alpha-team — First team (researcher)" });
+      await handler("", alphaCtx);
+
+      // Record alpha run state before the cancelled switch.
+      const alphaRunsDir = join(dir, ".pi", "agent-teams", "runs", "alpha-team");
+      const alphaRunDirsBefore = readdirSync(alphaRunsDir);
+      expect(alphaRunDirsBefore).toHaveLength(1);
+      const alphaRunJsonPath = join(alphaRunsDir, alphaRunDirsBefore[0]!, "run.json");
+
+      // Attempt switch to beta-team — user cancels the confirmation.
+      const cancelUI = makeUI({ selectAnswer: "beta-team — Second team (researcher)" });
+      cancelUI.confirm.mockResolvedValue(false);
+      const cancelCtx = makeCtx({ cwd: dir });
+      cancelCtx.ui = cancelUI;
+      await handler("", cancelCtx);
+
+      // confirm must have been called once.
+      expect(cancelUI.confirm).toHaveBeenCalledTimes(1);
+
+      // Alpha run must still be "running" — not interrupted.
+      const alphaRunJson = JSON.parse(readFileSync(alphaRunJsonPath, "utf-8"));
+      expect(alphaRunJson.status).toBe("running");
+
+      // No beta-team directory must exist.
+      const betaRunsDir = join(dir, ".pi", "agent-teams", "runs", "beta-team");
+      expect(existsSync(betaRunsDir)).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+// ─── Re-selecting the same team ───────────────────────────────────────────────
+
+describe("team-select — re-selecting the same active team", () => {
+  it("is a no-op when the active team already has a run (no new run created, no interruption)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "agent-teams-reselect-noop-"));
+    try {
+      const { handler } = await setupMultiTeamProject(dir);
+
+      // First call: select alpha-team → creates a run.
+      const alphaCtx = makeCtx({ cwd: dir });
+      alphaCtx.ui = makeUI({ selectAnswer: "alpha-team — First team (researcher)" });
+      await handler("", alphaCtx);
+
+      const alphaRunsDir = join(dir, ".pi", "agent-teams", "runs", "alpha-team");
+      const runsBefore = readdirSync(alphaRunsDir);
+      expect(runsBefore).toHaveLength(1);
+      const runIdBefore = runsBefore[0]!;
+
+      // Second call: re-select alpha-team (same team) → must be a no-op.
+      const reCtx = makeCtx({ cwd: dir });
+      reCtx.ui = makeUI({ selectAnswer: "alpha-team — First team (researcher)" });
+      await handler("", reCtx);
+
+      // No new run directory must have appeared.
+      const runsAfter = readdirSync(alphaRunsDir);
+      expect(runsAfter).toHaveLength(1);
+      expect(runsAfter[0]).toBe(runIdBefore);
+
+      // The run must still be "running", not "interrupted".
+      const runJson = JSON.parse(
+        readFileSync(join(alphaRunsDir, runIdBefore, "run.json"), "utf-8"),
+      );
+      expect(runJson.status).toBe("running");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("does NOT call ctx.ui.confirm when re-selecting the same team", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "agent-teams-reselect-noconfirm-"));
+    try {
+      const { handler } = await setupMultiTeamProject(dir);
+
+      // Establish an active run on alpha-team.
+      const alphaCtx = makeCtx({ cwd: dir });
+      alphaCtx.ui = makeUI({ selectAnswer: "alpha-team — First team (researcher)" });
+      await handler("", alphaCtx);
+
+      // Re-select the same team with a fresh ui so we can spy on confirm.
+      const reUI = makeUI({ selectAnswer: "alpha-team — First team (researcher)" });
+      const reCtx = makeCtx({ cwd: dir });
+      reCtx.ui = reUI;
+      await handler("", reCtx);
+
+      // confirm must never have been called.
+      expect(reUI.confirm).not.toHaveBeenCalled();
+      // notifyTeamActive() fires on re-select, so notify must have been called.
+      expect(reUI.notify).toHaveBeenCalledWith(
+        expect.stringContaining("alpha-team"),
+        "info",
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("falls through and creates a run when re-selecting the auto-activated team with no run yet (multi-team deferred path)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "agent-teams-reselect-deferred-"));
+    try {
+      const { handler } = await setupMultiTeamProject(dir);
+
+      // session_start with two teams defers run creation — no run exists yet.
+      const runsRoot = join(dir, ".pi", "agent-teams", "runs");
+      expect(existsSync(runsRoot)).toBe(false);
+
+      // Select alpha-team (the auto-activated team) for the first time.
+      // currentRun is null so the no-op guard must not fire and a run must be created.
+      const alphaCtx = makeCtx({ cwd: dir });
+      alphaCtx.ui = makeUI({ selectAnswer: "alpha-team — First team (researcher)" });
+      await handler("", alphaCtx);
+
+      const alphaRunsDir = join(dir, ".pi", "agent-teams", "runs", "alpha-team");
+      expect(existsSync(alphaRunsDir)).toBe(true);
+      const runDirs = readdirSync(alphaRunsDir);
+      expect(runDirs).toHaveLength(1);
+
+      const runJson = JSON.parse(
+        readFileSync(join(alphaRunsDir, runDirs[0]!, "run.json"), "utf-8"),
+      );
+      expect(runJson.team).toBe("alpha-team");
+      expect(runJson.status).toBe("running");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("does NOT show confirm when switching to a different team with no active run", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "agent-teams-switch-norun-"));
+    try {
+      const { handler } = await setupMultiTeamProject(dir);
+
+      // Switch from auto-activated alpha-team (no run) straight to beta-team.
+      const betaUI = makeUI({ selectAnswer: "beta-team — Second team (researcher)" });
+      const betaCtx = makeCtx({ cwd: dir });
+      betaCtx.ui = betaUI;
+      await handler("", betaCtx);
+
+      // confirm must not have been called — there was no run to interrupt.
+      expect(betaUI.confirm).not.toHaveBeenCalled();
+
+      // A run must have been created under beta-team.
+      const betaRunsDir = join(dir, ".pi", "agent-teams", "runs", "beta-team");
+      expect(existsSync(betaRunsDir)).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

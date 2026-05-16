@@ -660,6 +660,25 @@ export default function (pi: ExtensionAPI): void {
         return;
       }
 
+      // Shared helper — emits the “team is now active” status bar entry and
+      // notification using current module-level state. Defined here so it
+      // can be called both when re-confirming the already-active team and
+      // after a genuine switch, keeping both paths in sync automatically.
+      const notifyTeamActive = () => {
+        ctx.ui.setStatus(
+          "agent-team",
+          `Team: ${activeTeamName} (${teamAgents.size} agents, ${activeTeam?.workspaceMode} mode)`,
+        );
+        const members = Array.from(teamAgents.values()).map((a) => displayName(a.name)).join(", ");
+        ctx.ui.notify(
+          `Team: ${activeTeamName}\nMembers: ${members}\nWorkspace: ${activeTeam?.workspaceMode}\nMax concurrency: ${activeTeam?.maxConcurrency}`
+            + (currentRun ? `\nRun: ${currentRun.runId}` : ""),
+          "info",
+        );
+      };
+
+      // Show the picker first — we need the chosen name before we can
+      // decide whether a warning or any state change is necessary.
       const options = teamNames.map((name) => {
         const t = allTeams[name];
         return `${name} — ${t.description} (${t.members.join(", ")})`;
@@ -669,14 +688,58 @@ export default function (pi: ExtensionAPI): void {
       if (choice === undefined) return;
 
       const idx = options.indexOf(choice);
-      const name = teamNames[idx];
+      if (idx === -1) return; // safety: should never happen with a well-behaved select
+      const name = teamNames[idx]!;
+
+      // Re-selecting the already-active team when a run exists: show current
+      // team info as confirmation and bail out — nothing needs to change.
+      // When currentRun is null the user may be explicitly initialising
+      // the team for the first time (multi-team deferred path), so fall through.
+      if (name === activeTeamName && currentRun !== null) {
+        notifyTeamActive();
+        return;
+      }
+
+      // Only warn about interruption when switching to a genuinely different
+      // team AND there is an active run that would be lost.
+      if (name !== activeTeamName && currentRun !== null && currentRun.status === "running") {
+        const confirmed = await ctx.ui.confirm(
+          "Switch teams?",
+          `You have an active run for "${activeTeamName}" (\u2026${currentRun.runId.slice(-8)}).\nSwitching teams will mark it as interrupted.`,
+        );
+        if (!confirmed) return;
+      }
+
+      // Close out the old run (if any) before switching teams so it is not
+      // left permanently as "running" on disk.
+      if (currentRun !== null) {
+        updateRunStatus(projectCwd, activeTeamName, currentRun.runId, "interrupted");
+        currentRun = null;
+        currentRunDir = "";
+      }
+
       activateTeam(name);
 
+      // Reset agentPanel for the newly selected team so the panel widget
+      // reflects the correct members (mirrors panel-init in session_start).
+      agentPanel.clear();
+      for (const memberName of (activeTeam?.members ?? [])) {
+        const def = teamAgents.get(memberName.toLowerCase());
+        agentPanel.set(memberName.toLowerCase(), {
+          status: "idle",
+          model: def?.model?.split("/").pop(),
+        });
+      }
+      if (panelCtx) updatePanel(panelCtx);
+
       if (teamAgents.size > 0) {
-        if (!currentRun) {
-          currentRun = createRun(ctx.cwd, activeTeamName, "(goal will be set on first dispatch)");
-          currentRunDir = runDir(ctx.cwd, activeTeamName, currentRun.runId);
-        }
+        // Always create a fresh run for the newly selected team regardless of
+        // whether a run existed before — the old guard `if (!currentRun)` was
+        // the root cause of workspaces being written under the wrong team.
+        currentRun = createRun(ctx.cwd, activeTeamName, "(goal will be set on first dispatch)");
+        currentRunDir = runDir(ctx.cwd, activeTeamName, currentRun.runId);
+        if (panelCtx) updatePanel(panelCtx); // refresh panel with live run status
+
         const hasTodosTool = pi.getAllTools().some((t) => t.name === "manage_tasks");
         if (!hasTodosTool) {
           ctx.ui.notify(
@@ -691,14 +754,7 @@ export default function (pi: ExtensionAPI): void {
         pi.setActiveTools(allNames);
       }
 
-      ctx.ui.setStatus(
-        "agent-team",
-        `Team: ${name} (${teamAgents.size} agents, ${activeTeam?.workspaceMode} mode)`,
-      );
-      ctx.ui.notify(
-        `Team: ${name}\nMembers: ${Array.from(teamAgents.values()).map((a) => displayName(a.name)).join(", ")}\nWorkspace: ${activeTeam?.workspaceMode}\nMax concurrency: ${activeTeam?.maxConcurrency}`,
-        "info",
-      );
+      notifyTeamActive()
     },
   });
 
@@ -898,9 +954,18 @@ ${agentCatalog()}`,
       return;
     }
 
-    // Create a run for this session.
-    currentRun = createRun(ctx.cwd, activeTeamName, "(goal will be set on first dispatch)");
-    currentRunDir = runDir(ctx.cwd, activeTeamName, currentRun.runId);
+    // For single-team setups, create the run immediately so the user can
+    // start working without calling /team-select first (preserves existing
+    // single-team behaviour).
+    // For multi-team setups, defer run creation until the user explicitly
+    // picks a team via /team-select — creating one now would stamp all
+    // subsequent work under the first (auto-activated) team's directory
+    // even if the user selects a different team.
+    // run will be created when user selects a team via /team-select
+    if (teamNames.length === 1) {
+      currentRun = createRun(ctx.cwd, activeTeamName, "(goal will be set on first dispatch)");
+      currentRunDir = runDir(ctx.cwd, activeTeamName, currentRun.runId);
+    }
 
     // Initialise agentPanel for all team members and show idle panel.
     panelCtx = ctx;
@@ -915,7 +980,11 @@ ${agentCatalog()}`,
     updatePanel(ctx);
 
     // Lock down to orchestrator-only tools and redirect todos to run dir.
-    setActiveTodosDir(currentRunDir);
+    // Only redirect todos when a run directory already exists (single-team
+    // path); in the multi-team path the redirect happens inside /team-select.
+    if (currentRunDir) {
+      setActiveTodosDir(currentRunDir);
+    }
     pi.setActiveTools(["dispatch_agent", "manage_tasks"]);
 
     const members = Array.from(teamAgents.values())
@@ -931,7 +1000,9 @@ ${agentCatalog()}`,
         `Team: ${activeTeamName} (${members})\n` +
         `Workspace: ${activeTeam?.workspaceMode}\n` +
         `Max concurrency: ${activeTeam?.maxConcurrency}\n` +
-        `Run: ${currentRun.runId}\n\n` +
+        (currentRun
+          ? `Run: ${currentRun.runId}\n\n`
+          : `Use /team-select to begin working with a team\n\n`) +
         `/team-select    Select a team\n` +
         `/team-list      List agents\n` +
         `/team-status    Show run status\n` +
