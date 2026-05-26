@@ -126,6 +126,7 @@ You are a read-only agent with no extensions.
 team-name:
   description: "Team description"
   workspaceMode: shared      # "shared" or "worktree"
+  cleanupWorktree: false     # true = remove worktree checkout on run-end (branch kept)
   maxConcurrency: 2          # Max parallel agents
   members:
     - agent-name-1
@@ -209,7 +210,7 @@ When `skills:` is set, each named skill is resolved to its directory path and pa
 ## Workspace Modes
 
 - **`shared`** — All agents work in the project directory. Simplest, but agents may conflict on files.
-- **`worktree`** — Each agent gets a git worktree branch. Requires the `git-worktree` extension and a clean working tree. Best for parallel write operations.
+- **`worktree`** — All agents in a run share **one** git worktree (branch named after the run ID), isolating their work from the main branch. Requires a clean working tree at dispatch time. Set `cleanupWorktree: true` on the team to remove the checkout directory (branch is preserved) when the run ends.
 
 ## Filesystem Layout
 

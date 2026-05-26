@@ -75,6 +75,9 @@ export interface TeamConfig {
   maxConcurrency: number;
   /** Agent names that belong to this team (must match AgentDefinition.name). */
   members: string[];
+  /** Remove the worktree directory (not the branch) when the run ends. Default: false.
+   * In teams.yaml use `cleanupWorktree: true` (only the literal string "true" is accepted). */
+  cleanupWorktree?: boolean;
 }
 
 // ── Handoff Log ──────────────────────────────────

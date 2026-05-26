@@ -21,6 +21,7 @@ interface RawTeam {
   workspaceMode: string;
   maxConcurrency: string;
   members: string[];
+  cleanupWorktree?: string;
 }
 
 /**
@@ -45,6 +46,7 @@ export function parseTeamsYaml(raw: string): Record<string, RawTeam> {
         workspaceMode: "shared",
         maxConcurrency: "1",
         members: [],
+        cleanupWorktree: "false",
       };
       currentField = null;
       continue;
@@ -60,6 +62,7 @@ export function parseTeamsYaml(raw: string): Record<string, RawTeam> {
       if (key === "description") teams[current].description = value;
       else if (key === "workspaceMode") teams[current].workspaceMode = value;
       else if (key === "maxConcurrency") teams[current].maxConcurrency = value;
+      else if (key === "cleanupWorktree") teams[current].cleanupWorktree = value;
       // "members:" with no value just sets the field context for list items
       continue;
     }
@@ -117,6 +120,7 @@ export function loadTeams(
       workspaceMode: wsMode,
       maxConcurrency: Number.isFinite(maxConc) && maxConc > 0 ? maxConc : 1,
       members: validMembers,
+      cleanupWorktree: rt.cleanupWorktree === "true",
     };
   }
 

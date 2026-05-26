@@ -68,6 +68,31 @@ team-a:
   it("returns empty for empty input", () => {
     expect(parseTeamsYaml("")).toEqual({});
   });
+
+  it("parses cleanupWorktree: true", () => {
+    const yaml = `
+my-team:
+  description: "My team"
+  workspaceMode: worktree
+  cleanupWorktree: true
+  members:
+    - researcher
+`;
+    const result = parseTeamsYaml(yaml);
+    expect(result["my-team"].cleanupWorktree).toBe("true");
+  });
+
+  it("defaults cleanupWorktree to false when absent", () => {
+    const yaml = `
+my-team:
+  description: "My team"
+  workspaceMode: shared
+  members:
+    - researcher
+`;
+    const result = parseTeamsYaml(yaml);
+    expect(result["my-team"].cleanupWorktree).toBe("false");
+  });
 });
 
 describe("loadTeams", () => {
@@ -118,6 +143,23 @@ describe("loadTeams", () => {
 
   it("returns empty when teams.yaml is missing", () => {
     expect(loadTeams(tmpDir, [fakeAgent("researcher")])).toEqual({});
+  });
+
+  it("sets cleanupWorktree: true when configured", () => {
+    const teamsYaml = `
+my-team:
+  description: "My team"
+  workspaceMode: worktree
+  cleanupWorktree: true
+  members:
+    - researcher
+`;
+    const agentsDir = join(tmpDir, ".pi", "agents");
+    mkdirSync(agentsDir, { recursive: true });
+    writeFileSync(join(agentsDir, "teams.yaml"), teamsYaml);
+    const agents = [fakeAgent("researcher")];
+    const teams = loadTeams(tmpDir, agents);
+    expect(teams["my-team"].cleanupWorktree).toBe(true);
   });
 
   it("defaults workspaceMode to shared and maxConcurrency to 1", () => {

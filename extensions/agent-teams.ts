@@ -47,6 +47,8 @@ let activeTeamName = "";
 let activeTeam: TeamConfig | null = null;
 let currentRun: RunState | null = null;
 let currentRunDir = "";
+let currentRunWorktreePath: string | null = null;
+let currentRunWorktreeBranch: string | null = null;
 let projectCwd = "";
 
 /** Map of agent name (lowercase) → definition for the active team. */
@@ -302,6 +304,35 @@ function activateTeam(teamName: string): void {
 }
 
 /**
+ * Resets shared worktree state and, when `ctx` is provided, notifies the user
+ * of the preserved branch name. If `cleanupWorktree` is enabled on the active
+ * team, also removes the worktree checkout directory (branch is kept).
+ */
+function cleanupRunWorktree(ctx?: ExtensionContext): void {
+  if (!currentRunWorktreePath) return;
+  if (!projectCwd) return;
+  const path = currentRunWorktreePath;
+  const branch = currentRunWorktreeBranch;
+  currentRunWorktreePath = null;
+  currentRunWorktreeBranch = null;
+  try {
+    if (activeTeam?.cleanupWorktree) {
+      const repoRoot = findGitRoot(projectCwd);
+      removeWorktree(repoRoot, path, { deleteBranch: false });
+    }
+    if (ctx && branch) {
+      ctx.ui.notify(
+        `Worktree branch preserved: ${branch}\n` +
+        `Review and merge: git merge ${branch}`,
+        "info",
+      );
+    }
+  } catch {
+    // Best-effort; don't crash on cleanup failure.
+  }
+}
+
+/**
  * Dispatch an agent: create workspace, log handoff, spawn pi, log completion.
  */
 async function dispatchAgentForTask(
@@ -365,20 +396,29 @@ async function dispatchAgentForTask(
   if (activeTeam?.workspaceMode === "worktree") {
     try {
       const repoRoot = findGitRoot(projectCwd);
-      if (!isCleanWorkingTree(repoRoot)) {
-        const ps3 = agentPanel.get(key) ?? { status: "idle" as const };
-        ps3.status = "error";
-        agentPanel.set(key, ps3);
-        updatePanel(ctx);
-        return {
-          output: "Cannot create worktree: working tree has uncommitted changes. Commit or stash first.",
-          exitCode: 1,
-          elapsedMs: 0,
-        };
+      if (currentRunWorktreePath) {
+        // Reuse the shared worktree already created for this run.
+        agentCwd = currentRunWorktreePath;
+      } else {
+        // First agent in this run — create the shared worktree.
+        if (!isCleanWorkingTree(repoRoot)) {
+          const ps3 = agentPanel.get(key) ?? { status: "idle" as const };
+          ps3.status = "error";
+          agentPanel.set(key, ps3);
+          updatePanel(ctx);
+          return {
+            output: "Cannot create worktree: working tree has uncommitted changes. Commit or stash first.",
+            exitCode: 1,
+            elapsedMs: 0,
+          };
+        }
+        // If createWorktree throws, currentRunWorktreePath stays null and
+        // the next dispatch will retry — no stale state is left behind.
+        const wt = createWorktree(repoRoot, currentRun.runId);
+        currentRunWorktreePath = wt.path;
+        currentRunWorktreeBranch = wt.branch;
+        agentCwd = wt.path;
       }
-      const wtName = `${currentRun.runId}-${agentName}`;
-      const wt = createWorktree(repoRoot, wtName);
-      agentCwd = wt.path;
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       const ps4 = agentPanel.get(key) ?? { status: "idle" as const };
@@ -386,7 +426,7 @@ async function dispatchAgentForTask(
       agentPanel.set(key, ps4);
       updatePanel(ctx);
       return {
-        output: `Failed to create worktree for ${agentName}: ${msg}. Falling back to shared workspace.`,
+        output: `Failed to create worktree: ${msg}.`,
         exitCode: 1,
         elapsedMs: 0,
       };
@@ -714,6 +754,7 @@ export default function (pi: ExtensionAPI): void {
       // left permanently as "running" on disk.
       if (currentRun !== null) {
         updateRunStatus(projectCwd, activeTeamName, currentRun.runId, "interrupted");
+        cleanupRunWorktree(ctx);
         currentRun = null;
         currentRunDir = "";
       }
@@ -863,6 +904,7 @@ export default function (pi: ExtensionAPI): void {
         await updateRunStatus(projectCwd, activeTeamName, currentRun.runId, "interrupted");
       }
 
+      cleanupRunWorktree(ctx);
       activeTeamName = "";
       activeTeam = null;
       teamAgents.clear();
@@ -1020,6 +1062,7 @@ ${agentCatalog()}`,
       const allDone = tasks.length > 0 && tasks.every((t) => t.status === "done" || t.status === "failed");
       const newStatus = allDone ? "completed" : "interrupted";
       updateRunStatus(projectCwd, activeTeamName, currentRun.runId, newStatus);
+      cleanupRunWorktree(ctx);
     }
 
     // Stop the panel timer and remove the panel widget on shutdown.

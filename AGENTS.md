@@ -61,7 +61,7 @@ The orchestrator pattern is the largest single piece of logic — read `extensio
 Key invariants:
 - Child agents are separate `pi` processes spawned by `agent-runner.ts`. They set `PI_AGENT_TEAMS_CHILD=1` so `agent-teams.ts` short-circuits and does not become a recursive orchestrator.
 - Skill resolution rule (decision matrix in `extensions/agent-teams/README.md`): if an agent's frontmatter sets `extensions:` (empty or list), pi runs with `--no-extensions` and package skill auto-discovery is suppressed — the agent must list every needed skill in `skills:`. If `extensions:` is absent, omit `skills:` entirely.
-- Worktree mode requires a clean working tree. Worktrees named `<runId>-<agentName>` (no `agent-teams/` prefix — see commit `31f6a00`).
+- Worktree mode requires a clean working tree. All agents in a run share **one** worktree named `<runId>`. Set `cleanupWorktree: true` in `teams.yaml` to remove the checkout directory (not the branch) on run-end.
 - `_activeTodosDir` module state in `todos.ts` is set by `agent-teams.ts` so `manage_tasks` writes into the run dir instead of `.pi/todos/`.
 
 ### Sandbox precedence quirk
@@ -80,6 +80,7 @@ Key invariants:
 - `peerDependencies: @mariozechner/pi-coding-agent` — never import implementation details, only types/public API surface.
 - `.gitignore` excludes `.pi/agent-teams`, `.pi/plans`, `.pi/todos` — these are runtime state, not config.
 - Build artefacts (`*.js`, `*.d.ts`, `*.js.map`) are gitignored but published from `dist/` per `package.json files`.
+- **Test every call-site, not just the function.** When a helper is called from N places, write N tests — one per call-site. A plan step that says "call X at every Y" is an N-site obligation: the test spec must list a case for each site explicitly. A passing test on one path gives no signal about sibling paths; untested call-sites must be flagged as explicitly out-of-scope, not left as implicit gaps.
 
 ## Picking up work from `.pi/backlog/`
 

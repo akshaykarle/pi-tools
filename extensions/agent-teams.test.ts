@@ -1,4 +1,5 @@
 import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync, readFileSync, existsSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -1026,5 +1027,239 @@ describe("team-select — re-selecting the same active team", () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("worktree mode", () => {
+  const execFileSyncMock = execFileSync as ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    execFileSyncMock.mockReset();
+
+    // Default git responses (execFileSync is called as execFileSync("git", args, opts)):
+    // rev-parse --show-toplevel → tmpDir (repoRoot)
+    // status --porcelain        → "" (clean working tree)
+    // worktree add              → "" (success)
+    // branch --show-current     → "run-test-branch"
+    execFileSyncMock.mockImplementation((_cmd: string, args: string[]) => {
+      if (args.includes("--show-toplevel")) return tmpDir;
+      if (args.includes("--porcelain")) return "";
+      if (args.includes("add")) return "";
+      if (args.includes("--show-current")) return "run-test-branch";
+      return "";
+    });
+  });
+
+  it("two dispatches in the same run share one worktree", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "wt-test-"));
+    try {
+      const agentsDir = join(dir, ".pi", "agents");
+      mkdirSync(agentsDir, { recursive: true });
+
+      writeFileSync(
+        join(agentsDir, "researcher.md"),
+        `---
+name: researcher
+description: Research agent
+tools: read
+---
+You are a researcher.
+`,
+      );
+      writeFileSync(
+        join(agentsDir, "implementer.md"),
+        `---
+name: implementer
+description: Implementer agent
+---
+You are an implementer.
+`,
+      );
+      writeFileSync(
+        join(agentsDir, "teams.yaml"),
+        `wt-team:
+  description: "Worktree team"
+  workspaceMode: worktree
+  maxConcurrency: 2
+  members:
+    - researcher
+    - implementer
+`,
+      );
+
+      vi.resetModules();
+      const { default: freshFactory } = await import("./agent-teams.js");
+      const mock = makeMockApi();
+      freshFactory(mock.api as unknown as Parameters<typeof freshFactory>[0]);
+      mock.api.getAllTools.mockReturnValue([{ name: "dispatch_agent" }, { name: "manage_tasks" }]);
+
+      const ctx = makeCtx({ cwd: dir });
+      (ctx as Record<string, unknown>).model = { provider: "anthropic", id: "test-model" };
+      (ctx as Record<string, unknown>).getActiveTools = () => [];
+      await mock.invoke.sessionStart(ctx);
+
+      const toolCall = mock.api.registerTool.mock.calls.find(
+        (c: unknown[]) => (c[0] as { name: string }).name === "dispatch_agent",
+      );
+      const execute = (toolCall![0] as { execute: Function }).execute;
+
+      spawnMock.mockReset();
+      execFileSyncMock.mockReset();
+      execFileSyncMock.mockImplementation((_cmd: string, args: string[]) => {
+        if (args.includes("--show-toplevel")) return tmpDir;
+        if (args.includes("--porcelain")) return "";
+        if (args.includes("add")) return "";
+        if (args.includes("--show-current")) return "run-test-branch";
+        return "";
+      });
+
+      // Dispatch two agents.
+      await execute("call-a", { agent: "researcher", taskId: "task-1", task: "research something" }, undefined, undefined, ctx);
+      await execute("call-b", { agent: "implementer", taskId: "task-2", task: "implement something" }, undefined, undefined, ctx);
+
+      // git worktree add should have been called exactly once.
+      const worktreeAddCalls = execFileSyncMock.mock.calls.filter(
+        (c: unknown[]) => Array.isArray(c[1]) && (c[1] as string[]).includes("add"),
+      );
+      expect(worktreeAddCalls).toHaveLength(1);
+
+      // Both spawned agents should have received the same cwd.
+      // spawnMock is called as spawn("pi", args, { cwd, ... })
+      const cwds = spawnMock.mock.calls.map((c: unknown[]) => (c[2] as { cwd?: string })?.cwd);
+      expect(cwds).toHaveLength(2);
+      expect(cwds[0]).toBe(cwds[1]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("calls git worktree remove on session_shutdown when cleanupWorktree: true", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "wt-cleanup-test-"));
+    const agentsDir = join(dir, ".pi", "agents");
+    mkdirSync(agentsDir, { recursive: true });
+    writeFileSync(join(agentsDir, "researcher.md"), `---
+name: researcher
+description: Research agent
+tools: read
+---
+You are a researcher.
+`);
+    writeFileSync(join(agentsDir, "teams.yaml"), `wt-team:
+  description: "Worktree team"
+  workspaceMode: worktree
+  cleanupWorktree: true
+  maxConcurrency: 1
+  members:
+    - researcher
+`);
+
+    vi.resetModules();
+    const { default: freshFactory } = await import("./agent-teams.js");
+    const mock = makeMockApi();
+    freshFactory(mock.api as unknown as Parameters<typeof freshFactory>[0]);
+    mock.api.getAllTools.mockReturnValue([{ name: "dispatch_agent" }, { name: "manage_tasks" }]);
+
+    const ctx = makeCtx({ cwd: dir });
+    (ctx as Record<string, unknown>).model = { provider: "anthropic", id: "test-model" };
+    (ctx as Record<string, unknown>).getActiveTools = () => [];
+    await mock.invoke.sessionStart(ctx);
+
+    // Configure execFileSync mock.
+    (execFileSync as ReturnType<typeof vi.fn>).mockReset();
+    (execFileSync as ReturnType<typeof vi.fn>).mockImplementation((_cmd: string, args: string[]) => {
+      if (args.includes("--show-toplevel")) return dir;
+      if (args.includes("--porcelain")) return "";
+      if (args.includes("add")) return "";
+      if (args.includes("--show-current")) return "run-test-branch";
+      return "";
+    });
+
+    // Dispatch one agent to create the shared worktree.
+    const toolCall = mock.api.registerTool.mock.calls.find(
+      (c: unknown[]) => (c[0] as { name: string }).name === "dispatch_agent",
+    );
+    const execute = (toolCall![0] as { execute: Function }).execute;
+    spawnMock.mockReset();
+    await execute("call-a", { agent: "researcher", taskId: "task-1", task: "do research" }, undefined, undefined, ctx);
+
+    // Clear so we can assert on shutdown calls only.
+    (execFileSync as ReturnType<typeof vi.fn>).mockClear();
+
+    // Trigger session shutdown.
+    await mock.invoke.sessionShutdown(ctx);
+
+    // Should have called `git worktree remove <path>`.
+    const removeCalls = (execFileSync as ReturnType<typeof vi.fn>).mock.calls.filter(
+      (c: unknown[]) => Array.isArray(c[1]) && (c[1] as string[]).includes("remove"),
+    );
+    expect(removeCalls.length).toBeGreaterThan(0);
+
+    // Should NOT have called `git branch -D` (deleteBranch: false).
+    const branchDeleteCalls = (execFileSync as ReturnType<typeof vi.fn>).mock.calls.filter(
+      (c: unknown[]) => Array.isArray(c[1]) && (c[1] as string[])[0] === "branch" && (c[1] as string[]).includes("-D"),
+    );
+    expect(branchDeleteCalls).toHaveLength(0);
+
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("notifies user of branch name on session_shutdown after worktree run", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "wt-notify-test-"));
+    const agentsDir = join(dir, ".pi", "agents");
+    mkdirSync(agentsDir, { recursive: true });
+    writeFileSync(join(agentsDir, "researcher.md"), `---
+name: researcher
+description: Research agent
+tools: read
+---
+You are a researcher.
+`);
+    writeFileSync(join(agentsDir, "teams.yaml"), `wt-team:
+  description: "Worktree team"
+  workspaceMode: worktree
+  maxConcurrency: 1
+  members:
+    - researcher
+`);
+
+    vi.resetModules();
+    const { default: freshFactory } = await import("./agent-teams.js");
+    const mock = makeMockApi();
+    freshFactory(mock.api as unknown as Parameters<typeof freshFactory>[0]);
+    mock.api.getAllTools.mockReturnValue([{ name: "dispatch_agent" }, { name: "manage_tasks" }]);
+
+    const ctx = makeCtx({ cwd: dir });
+    (ctx as Record<string, unknown>).model = { provider: "anthropic", id: "test-model" };
+    (ctx as Record<string, unknown>).getActiveTools = () => [];
+    await mock.invoke.sessionStart(ctx);
+
+    (execFileSync as ReturnType<typeof vi.fn>).mockReset();
+    (execFileSync as ReturnType<typeof vi.fn>).mockImplementation((_cmd: string, args: string[]) => {
+      if (args.includes("--show-toplevel")) return dir;
+      if (args.includes("--porcelain")) return "";
+      if (args.includes("add")) return "";
+      if (args.includes("--show-current")) return "run-test-branch";
+      return "";
+    });
+
+    const toolCall = mock.api.registerTool.mock.calls.find(
+      (c: unknown[]) => (c[0] as { name: string }).name === "dispatch_agent",
+    );
+    const execute = (toolCall![0] as { execute: Function }).execute;
+    spawnMock.mockReset();
+    await execute("call-a", { agent: "researcher", taskId: "task-1", task: "do research" }, undefined, undefined, ctx);
+
+    // Clear notification history from the dispatch phase.
+    (ctx.ui.notify as ReturnType<typeof vi.fn>).mockClear();
+
+    await mock.invoke.sessionShutdown(ctx);
+
+    // At least one notification should mention the preserved branch.
+    // The branch name is derived from the runId (sanitized), not from the git mock.
+    const notifyCalls = (ctx.ui.notify as ReturnType<typeof vi.fn>).mock.calls as [string, string][];
+    const branchNotice = notifyCalls.find(([msg]) => msg.includes("Worktree branch preserved:"));
+    expect(branchNotice).toBeDefined();
+
+    rmSync(dir, { recursive: true, force: true });
   });
 });
