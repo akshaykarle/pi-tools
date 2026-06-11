@@ -44,6 +44,21 @@ Returning `{ block: true, reason }` from a `tool_call` hook vetoes the call.
 | `git-worktree.ts` | `/worktree` command + helpers re-exported for `agent-teams` worktree mode. |
 | `@plannotator/pi-extension` | Bundled via `bundledDependencies`. Interactive plan annotator. |
 
+### Plain session vs orchestrator mode
+
+**This distinction matters — get it wrong and you'll waste round-trips.**
+
+| Mode | How to tell | Available tools | What to do |
+|---|---|---|---|
+| **Plain pi session** | No team selected; full tool access | `read`, `bash`, `grep`, `find`, `ls`, `write`, `edit`, … | Use tools directly |
+| **Orchestrator mode** | Team selected via `/team-select`; tools narrowed to `dispatch_agent` + `manage_tasks` | `dispatch_agent`, `manage_tasks` | Dispatch agents for all work |
+
+**Rules:**
+- In a plain session, **never reach for `dispatch_agent`** — use your tools directly (`read`, `bash`, `grep`, etc.).
+- `dispatch_agent` requires an active run. An active run only exists after `/team-select` starts a team session.
+- **The agent-teams extension being installed does not mean a team is active.** The extension loading and orchestrator mode are separate things.
+- If `dispatch_agent` returns *"No active run"*, you are in a plain session — switch to direct tools immediately.
+
 ### Agent-teams flow (most architecturally significant)
 
 The orchestrator pattern is the largest single piece of logic — read `extensions/agent-teams/README.md` for the full contract.

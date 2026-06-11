@@ -464,7 +464,7 @@ async function dispatchAgentForTask(
     agentPanel.set(key, ps1);
     updatePanel(ctx);
     return {
-      output: "No active run. This is a bug — the run should have been created automatically.",
+      output: "No active run. If you are in a plain pi session (no team selected), use your tools directly — read, bash, grep, find, ls — instead of dispatch_agent. dispatch_agent only works when a team is active and a run has been started (via /team-select). The agent-teams extension being installed does not mean a team is active.",
       exitCode: 1,
       elapsedMs: 0,
     };
@@ -1009,7 +1009,7 @@ export default function (pi: ExtensionAPI): void {
     description: "Show current run status and task board",
     handler: async (_args, ctx) => {
       if (!currentRun) {
-        ctx.ui.notify("No active run.", "info");
+        ctx.ui.notify("No active run. Use /team-select to start a team session first.", "info");
         return;
       }
 
@@ -1048,7 +1048,7 @@ export default function (pi: ExtensionAPI): void {
     description: "Display the handoff audit log",
     handler: async (_args, ctx) => {
       if (!currentRunDir) {
-        ctx.ui.notify("No active run.", "info");
+        ctx.ui.notify("No active run. Use /team-select to start a team session first.", "info");
         return;
       }
 
