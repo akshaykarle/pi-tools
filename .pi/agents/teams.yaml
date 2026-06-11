@@ -1,15 +1,62 @@
 # Agent Teams configuration
 # Each team defines its members, workspace isolation mode, and concurrency limits.
 
+# ── Default team ─────────────────────────────────────────────────────────────
+# Full pipeline: brainstorm → plan (human-gated via plannotator) →
+# implement → verify → review.
+# Use this for most feature work in this repo.
 default-team:
-  description: "Full-stack development team with research, implementation, and review"
+  description: "Full cycle: brainstorm → plan (human-gated) → implement → verify → review"
+  workspaceMode: worktree
+  maxConcurrency: 3
+  members:
+    - brainstormer
+    - planner
+    - ts-implementer
+    - test-writer
+    - docs-writer
+    - type-checker
+    - security-reviewer
+    - reviewer
+
+# ── Focused teams ─────────────────────────────────────────────────────────────
+
+# TypeScript feature work without the brainstorm/plan phase.
+# Use when the task is already well-specified (e.g. from an approved plan.md).
+ts-dev:
+  description: "TypeScript implementation: researcher → ts-implementer + test-writer → type-checker → reviewer"
+  workspaceMode: worktree
+  maxConcurrency: 2
+  members:
+    - researcher
+    - ts-implementer
+    - test-writer
+    - type-checker
+    - reviewer
+
+# Documentation, skills authoring, and agent/team config updates.
+# No bash anywhere — pure read/write/edit.
+docs-team:
+  description: "Documentation and agent config: researcher → docs-writer + agent-designer → reviewer"
   workspaceMode: shared
   maxConcurrency: 2
   members:
     - researcher
-    - implementer
+    - docs-writer
+    - agent-designer
     - reviewer
 
+# Read-only security review of any branch or changeset.
+# Safe to run on any branch — zero write access.
+security-audit:
+  description: "Security-focused read-only review"
+  workspaceMode: shared
+  maxConcurrency: 2
+  members:
+    - security-reviewer
+    - reviewer
+
+# Research only — codebase exploration and analysis.
 research-team:
   description: "Research-only team for codebase exploration and analysis"
   workspaceMode: shared
@@ -17,22 +64,19 @@ research-team:
   members:
     - researcher
 
-dev-worktree:
-  description: "Development team with git worktree isolation per agent"
-  workspaceMode: worktree
-  maxConcurrency: 2
-  members:
-    - researcher
-    - implementer
-    - reviewer
+# ── Experimental ──────────────────────────────────────────────────────────────
 
+# Guided planning experiment — smaller model forced to plan before acting.
 nano-team:
-  description: "Reliability experiment — smaller models with guided planning via plannotator"
+  description: "Reliability experiment — smaller model with guided planning via plannotator"
   workspaceMode: shared
   maxConcurrency: 1
   members:
     - nano-worker
 
+# ── Backlog product loop ───────────────────────────────────────────────────────
+
+# Competing implementations evaluated by a read-only judge.
 backlog-runner:
   description: "Product-loop team: competing teams evaluated by a read-only judge"
   workspaceMode: worktree
@@ -43,3 +87,13 @@ backlog-runner:
     - reviewer
   cross-team:  # not bound to any instance; dispatched at orchestrator's discretion
     - judge-default
+
+# Worktree-isolated development team (legacy — prefer ts-dev or default-team).
+dev-worktree:
+  description: "Development team with git worktree isolation per agent (legacy)"
+  workspaceMode: worktree
+  maxConcurrency: 2
+  members:
+    - researcher
+    - implementer
+    - reviewer
