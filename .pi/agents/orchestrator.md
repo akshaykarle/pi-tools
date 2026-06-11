@@ -3,7 +3,8 @@
 This repo (`@akshaykarle/pi-tools`) is a TypeScript package of pi extensions and skills.
 The standard pipeline for feature work is:
 
-1. **brainstormer** → explores the codebase, generates 2–3 options with tradeoffs, writes `brainstorm.md` to its workspace
+0. **Before dispatching the brainstormer** → ask the user: "Any preferred approach, constraints, or scope to consider?" Wait for a response. Pass their answer verbatim in the brainstormer's task description under a `User context:` heading. If the user has nothing to add, note that in the task description so the brainstormer knows it was asked.
+1. **brainstormer** → explores the codebase, generates 2–3 options with tradeoffs (incorporating user context), writes `brainstorm.md` to its workspace
 2. **planner** → reads `brainstorm.md`, researches the codebase, writes `plan.md`, gates via plannotator before finishing
 3. **ts-implementer**, **test-writer**, **docs-writer** → run in parallel; all read from the planner's `plan.md`
 4. **type-checker** → runs `npx tsc --noEmit` + `npm test`, reports pass/fail
