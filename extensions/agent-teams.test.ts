@@ -158,6 +158,76 @@ describe("agent-teams extension", () => {
     expect(result?.systemPrompt).toContain("dispatch_agent");
   });
 
+  it("omits orchestrator.md content when the file does not exist", async () => {
+    const mock = setup();
+    const ctx = makeCtx({ cwd: tmpDir });
+    (ctx as Record<string, unknown>).model = { provider: "anthropic", id: "test-model" };
+    (ctx as Record<string, unknown>).getActiveTools = () => [];
+
+    await mock.invoke.sessionStart(ctx);
+
+    const handler = mock.api.on.mock.calls.find(
+      (call: unknown[]) => call[0] === "before_agent_start",
+    )?.[1] as (event: unknown, ctx: unknown) => Promise<unknown>;
+
+    const result = (await handler({}, ctx)) as { systemPrompt?: string };
+
+    // Generic prompt still works.
+    expect(result?.systemPrompt).toContain("orchestrator agent");
+    // No stray undefined or placeholder.
+    expect(result?.systemPrompt).not.toContain("undefined");
+  });
+
+  it("injects orchestrator.md body into system prompt when the file exists", async () => {
+    writeFileSync(
+      join(tmpDir, ".pi", "agents", "orchestrator.md"),
+      `Repo-specific pipeline: step-a then step-b.`,
+    );
+
+    const mock = setup();
+    const ctx = makeCtx({ cwd: tmpDir });
+    (ctx as Record<string, unknown>).model = { provider: "anthropic", id: "test-model" };
+    (ctx as Record<string, unknown>).getActiveTools = () => [];
+
+    await mock.invoke.sessionStart(ctx);
+
+    const handler = mock.api.on.mock.calls.find(
+      (call: unknown[]) => call[0] === "before_agent_start",
+    )?.[1] as (event: unknown, ctx: unknown) => Promise<unknown>;
+
+    const result = (await handler({}, ctx)) as { systemPrompt?: string };
+
+    expect(result?.systemPrompt).toContain("Repo-specific pipeline: step-a then step-b.");
+    // Generic content still present.
+    expect(result?.systemPrompt).toContain("orchestrator agent");
+  });
+
+  it("strips YAML frontmatter from orchestrator.md and injects only the body", async () => {
+    writeFileSync(
+      join(tmpDir, ".pi", "agents", "orchestrator.md"),
+      `---
+title: Orchestrator Instructions
+---
+Repo-specific body content here.`,
+    );
+
+    const mock = setup();
+    const ctx = makeCtx({ cwd: tmpDir });
+    (ctx as Record<string, unknown>).model = { provider: "anthropic", id: "test-model" };
+    (ctx as Record<string, unknown>).getActiveTools = () => [];
+
+    await mock.invoke.sessionStart(ctx);
+
+    const handler = mock.api.on.mock.calls.find(
+      (call: unknown[]) => call[0] === "before_agent_start",
+    )?.[1] as (event: unknown, ctx: unknown) => Promise<unknown>;
+
+    const result = (await handler({}, ctx)) as { systemPrompt?: string };
+
+    expect(result?.systemPrompt).toContain("Repo-specific body content here.");
+    expect(result?.systemPrompt).not.toContain("title: Orchestrator Instructions");
+  });
+
   it.skip("manage_tasks tool can add and list tasks", async () => {
     // This test has been moved to extensions/todos/task-board.test.ts since manage_tasks
     // is now registered by the todos extension, not agent-teams.

@@ -13,6 +13,7 @@
 //   /team-handoffs — display the handoff audit log
 
 import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import { Type } from "typebox";
 import { loadAgentDefinitions } from "./agent-teams/agent-loader.js";
@@ -96,6 +97,26 @@ function displayName(name: string): string {
     .split("-")
     .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
     .join(" ");
+}
+
+/**
+ * Load repo-specific orchestrator instructions from `.pi/agents/orchestrator.md` if present.
+ * Returns the body as a markdown section, or an empty string if the file doesn't exist.
+ */
+function orchestratorInstructions(): string {
+  if (!projectCwd) return "";
+  const filePath = join(projectCwd, ".pi", "agents", "orchestrator.md");
+  if (!existsSync(filePath)) return "";
+  try {
+    const raw = readFileSync(filePath, "utf-8");
+    // Strip YAML frontmatter if present, use only the body.
+    // Strip YAML frontmatter (--- ... ---) if present.
+    const stripped = raw.replace(/^---[\s\S]*?---\s*/m, "");
+    const trimmed = stripped.trim();
+    return trimmed ? `${trimmed}\n\n` : "";
+  } catch {
+    return "";
+  }
 }
 
 function agentCatalog(): string {
@@ -1151,7 +1172,26 @@ ${currentRun ? `Current run: ${currentRun.runId}` : ""}
 - For inner-team agents: always specify teamInstance (1-based); agents in the same instance share a worktree
 - For cross-team agents (${crossTeamList}): omit teamInstance — they receive an instance manifest at dispatch time
 
-## Agents
+## Dispatch Guidance
+
+### Sequencing
+Dispatch agents in dependency order based on their dependencies. Do not start a task whose
+dependencies are not yet complete. Agents can run in parallel when they have no dependencies
+on each other.
+
+### Passing context between agents
+Agents have no memory of prior dispatches — every task description must be self-contained.
+When dispatching a downstream agent that depends on an upstream agent's output:
+- Include the exact workspace path to the upstream agent's output (e.g. the path to a plan,
+  brainstorm, notes, or results file written by a previous agent)
+- Summarise key results inline (e.g. "type-check: pass", "3 critical security findings — see <path>")
+- Never assume an agent can infer paths or context from prior conversation
+
+### Task descriptions
+Every dispatch_agent call must include: what to do, which files/paths are relevant, what the
+expected output artifact is, and any upstream results the agent needs to know about.
+
+${orchestratorInstructions()}## Agents
 
 ${agentCatalog()}`,
     };

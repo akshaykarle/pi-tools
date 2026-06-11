@@ -120,6 +120,30 @@ skills: read-only
 You are a read-only agent with no extensions.
 ```
 
+## Orchestrator System Prompt
+
+When a team is active, the extension injects a system prompt into the orchestrator session via the `before_agent_start` hook. This prompt includes generic guidance — sequencing, context-passing principles, task description rules — plus a dynamically built catalog of the active team's agents.
+
+To add **repo-specific** orchestrator guidance (e.g. a standard pipeline, conventions for passing artifacts between agents, or project-specific rules), create `.pi/agents/orchestrator.md`:
+
+```markdown
+<!-- .pi/agents/orchestrator.md -->
+## Repo Pipeline
+
+1. **researcher** → explores codebase, writes brainstorm.md
+2. **implementer** → reads brainstorm.md, writes code
+3. **reviewer** → final gate; receives paths to brainstorm.md and implementer output
+
+### Passing context to the reviewer
+Always include in the reviewer's task description:
+- Path to brainstorm artifact
+- Type-check result (pass/fail)
+```
+
+The body of `orchestrator.md` is appended to the orchestrator's system prompt at runtime. YAML frontmatter is stripped if present. The file is optional — if it doesn't exist, the generic prompt is used as-is.
+
+This keeps repo-specific pipeline knowledge out of the generic extension and co-located with the rest of your agent definitions.
+
 ## Team Config Format
 
 ```yaml
@@ -220,6 +244,7 @@ When `skills:` is set, each named skill is resolved to its directory path and pa
     researcher.md          # Agent definition
     implementer.md         # Agent definition
     teams.yaml             # Team definitions
+    orchestrator.md        # Optional: repo-specific orchestrator instructions
   agent-teams/
     runs/
       <team-name>/
