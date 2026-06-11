@@ -7,8 +7,8 @@
 # Use this for most feature work in this repo.
 default-team:
   description: "Full cycle: brainstorm → plan (human-gated) → implement → verify → review"
-  workspaceMode: worktree
-  maxConcurrency: 3
+  workspaceMode: shared
+  maxConcurrency: 1
   members:
     - brainstormer
     - planner

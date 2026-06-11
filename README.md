@@ -86,6 +86,22 @@ npx vitest run -t "name pattern"       # filter tests by name
 npm run tui             # launch the agent-teams TUI dashboard
 ```
 
+### Updating Dependencies
+
+To update all packages to their latest versions:
+
+```bash
+npx npm-check-updates -u
+npm install
+```
+
+**How it works:**
+- `npx` runs the tool **temporarily without a global install** — nothing is left behind on your system.
+- The `-u` flag stands for `--upgrade` and **rewrites `package.json`** in place with the latest version numbers.
+- Always run `npm test` after upgrading to catch any regressions.
+
+⚠️ **Caution:** Major version bumps may contain breaking changes. Review changelogs before upgrading, especially for core dependencies like `@mariozechner/pi-coding-agent` and `@anthropic-ai/sandbox-runtime`.
+
 ### Testing
 
 - Vitest with Node environment. Test files live next to source as `*.test.ts`.
