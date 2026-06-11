@@ -1125,6 +1125,8 @@ export default function (pi: ExtensionAPI): void {
       resetActiveTodosDir();
       pi.setActiveTools(allNames);
 
+      stopPanelTimer();
+      ctx.ui.setWidget("agent-team-panel", undefined);
       ctx.ui.setStatus("agent-team", undefined);
       ctx.ui.notify("Team mode disabled. Full tool access restored.", "info");
     },

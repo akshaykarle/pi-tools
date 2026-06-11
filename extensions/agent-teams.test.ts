@@ -368,11 +368,42 @@ describe("team-off", () => {
     // Status bar entry should be cleared.
     expect(ctx.ui.setStatus).toHaveBeenCalledWith("agent-team", undefined);
 
+    // Panel widget should be removed.
+    expect(ctx.ui.setWidget).toHaveBeenCalledWith("agent-team-panel", undefined);
+
     // User should be notified.
     expect(ctx.ui.notify).toHaveBeenCalledWith(
       "Team mode disabled. Full tool access restored.",
       "info",
     );
+  });
+
+  it("removes the panel widget and stops the panel timer", async () => {
+    const mock = setup();
+    const ctx = makeCtx({ cwd: tmpDir2 });
+    (ctx as Record<string, unknown>).model = { provider: "anthropic", id: "test-model" };
+    (ctx as Record<string, unknown>).getActiveTools = () => [];
+
+    // Activate team mode — this starts the panel timer and renders the widget.
+    await mock.invoke.sessionStart(ctx);
+
+    const call = mock.api.registerCommand.mock.calls.find(
+      (c: unknown[]) => c[0] === "team-off",
+    );
+    const teamOffHandler = call![1].handler as (_args: string, ctx: unknown) => Promise<void>;
+
+    vi.clearAllMocks();
+    await teamOffHandler("", ctx);
+
+    // The panel widget must be explicitly removed (not just left stale).
+    expect(ctx.ui.setWidget).toHaveBeenCalledWith("agent-team-panel", undefined);
+
+    // After team-off the widget must not be re-rendered by a lingering timer.
+    // Wait a tick to confirm no deferred setWidget calls arrive with content.
+    await new Promise((r) => setTimeout(r, 50));
+    const widgetCallsWithContent = (ctx.ui.setWidget as ReturnType<typeof vi.fn>).mock.calls
+      .filter((c: unknown[]) => c[0] === "agent-team-panel" && c[1] !== undefined);
+    expect(widgetCallsWithContent).toHaveLength(0);
   });
 
   it("marks the current run as interrupted on disk", async () => {
