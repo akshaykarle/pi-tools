@@ -262,4 +262,144 @@ my-team:
     expect(teams["minimal"].workspaceMode).toBe("shared");
     expect(teams["minimal"].maxConcurrency).toBe(1);
   });
+
+  // ── Default team tests ───────────────────────────────────────────────────────
+
+  it("parses default: true and sets isDefault: true", () => {
+    const yaml = `
+default-team:
+  description: "Default team"
+  default: true
+  workspaceMode: shared
+  members:
+    - researcher
+`;
+    const result = parseTeamsYaml(yaml);
+    expect(result["default-team"].isDefault).toBe("true");
+  });
+
+  it("defaults isDefault to false when default: key is absent", () => {
+    const yaml = `
+my-team:
+  description: "My team"
+  workspaceMode: shared
+  members:
+    - researcher
+`;
+    const result = parseTeamsYaml(yaml);
+    expect(result["my-team"].isDefault).toBe("false");
+  });
+
+  it("parses default: false explicitly", () => {
+    const yaml = `
+my-team:
+  description: "My team"
+  default: false
+  workspaceMode: shared
+  members:
+    - researcher
+`;
+    const result = parseTeamsYaml(yaml);
+    expect(result["my-team"].isDefault).toBe("false");
+  });
+
+  it("only one team with default: true in multi-team config", () => {
+    const yaml = `
+team-a:
+  description: "Team A"
+  workspaceMode: shared
+  members:
+    - researcher
+
+default-team:
+  description: "Default team"
+  default: true
+  workspaceMode: shared
+  members:
+    - implementer
+
+team-b:
+  description: "Team B"
+  workspaceMode: shared
+  members:
+    - researcher
+`;
+    const result = parseTeamsYaml(yaml);
+    expect(result["team-a"].isDefault).toBe("false");
+    expect(result["default-team"].isDefault).toBe("true");
+    expect(result["team-b"].isDefault).toBe("false");
+  });
+
+  it("loadTeams converts isDefault string to boolean", () => {
+    const agentsDir = join(tmpDir, ".pi", "agents");
+    mkdirSync(agentsDir, { recursive: true });
+
+    writeFileSync(
+      join(agentsDir, "teams.yaml"),
+      `default-team:
+  description: "Default team"
+  default: true
+  workspaceMode: shared
+  members:
+    - researcher
+`,
+    );
+
+    const agents = [fakeAgent("researcher")];
+    const teams = loadTeams(tmpDir, agents);
+    expect(teams["default-team"].isDefault).toBe(true);
+  });
+
+  it("loadTeams sets isDefault: false when default: key absent", () => {
+    const agentsDir = join(tmpDir, ".pi", "agents");
+    mkdirSync(agentsDir, { recursive: true });
+
+    writeFileSync(
+      join(agentsDir, "teams.yaml"),
+      `my-team:
+  description: "My team"
+  workspaceMode: shared
+  members:
+    - researcher
+`,
+    );
+
+    const agents = [fakeAgent("researcher")];
+    const teams = loadTeams(tmpDir, agents);
+    expect(teams["my-team"].isDefault).toBe(false);
+  });
+
+  it("loadTeams handles multiple teams with one default", () => {
+    const agentsDir = join(tmpDir, ".pi", "agents");
+    mkdirSync(agentsDir, { recursive: true });
+
+    writeFileSync(
+      join(agentsDir, "teams.yaml"),
+      `team-a:
+  description: "Team A"
+  workspaceMode: shared
+  members:
+    - researcher
+
+default-team:
+  description: "Default team"
+  default: true
+  workspaceMode: shared
+  members:
+    - implementer
+
+team-b:
+  description: "Team B"
+  workspaceMode: shared
+  members:
+    - researcher
+`,
+    );
+
+    const agents = [fakeAgent("researcher"), fakeAgent("implementer")];
+    const teams = loadTeams(tmpDir, agents);
+    expect(teams["team-a"].isDefault).toBe(false);
+    expect(teams["default-team"].isDefault).toBe(true);
+    expect(teams["team-b"].isDefault).toBe(false);
+  });
 });

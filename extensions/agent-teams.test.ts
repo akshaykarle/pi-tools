@@ -599,6 +599,230 @@ describe("session_start — no agents found", () => {
   });
 });
 
+describe("session_start — default team auto-activation", () => {
+  it("single-team repo auto-activates immediately (non-regression)", async () => {
+    // Setup single-team config (existing behavior).
+    const tmpSingle = mkdtempSync(join(tmpdir(), "agent-teams-single-"));
+    const agentsDir = join(tmpSingle, ".pi", "agents");
+    mkdirSync(agentsDir, { recursive: true });
+
+    writeFileSync(
+      join(agentsDir, "researcher.md"),
+      `---
+name: researcher
+description: Research agent
+---
+You are a researcher.
+`,
+    );
+
+    writeFileSync(
+      join(agentsDir, "teams.yaml"),
+      `my-team:
+  description: "My team"
+  workspaceMode: shared
+  maxConcurrency: 1
+  members:
+    - researcher
+`,
+    );
+
+    try {
+      vi.resetModules();
+      const { default: freshFactory } = await import("./agent-teams.js");
+      const mock = makeMockApi();
+      freshFactory(mock.api as unknown as Parameters<typeof freshFactory>[0]);
+
+      const ctx = makeCtx({ cwd: tmpSingle });
+      (ctx as Record<string, unknown>).model = { provider: "anthropic", id: "test-model" };
+      (ctx as Record<string, unknown>).getActiveTools = () => [];
+      await mock.invoke.sessionStart(ctx);
+
+      // Should have created a run immediately (single-team path).
+      const runsDir = join(tmpSingle, ".pi", "agent-teams", "runs", "my-team");
+      expect(existsSync(runsDir)).toBe(true);
+      const runDirs = readdirSync(runsDir);
+      expect(runDirs.length).toBeGreaterThan(0);
+
+      // Status bar should be set.
+      expect(ctx.ui.setStatus).toHaveBeenCalledWith(
+        "agent-team",
+        expect.stringContaining("my-team"),
+      );
+
+      // Notification should mention the run.
+      const notifyCalls = (ctx.ui.notify as ReturnType<typeof vi.fn>).mock.calls;
+      const notifyText = notifyCalls.map((c: unknown[]) => c[0] as string).join("\n");
+      expect(notifyText).toContain("Run:");
+    } finally {
+      rmSync(tmpSingle, { recursive: true, force: true });
+    }
+  });
+
+  it("multi-team repo with one default-marked team auto-activates that team", async () => {
+    const tmpMultiDefault = mkdtempSync(join(tmpdir(), "agent-teams-multi-default-"));
+    const agentsDir = join(tmpMultiDefault, ".pi", "agents");
+    mkdirSync(agentsDir, { recursive: true });
+
+    writeFileSync(
+      join(agentsDir, "researcher.md"),
+      `---
+name: researcher
+description: Research agent
+---
+You are a researcher.
+`,
+    );
+
+    writeFileSync(
+      join(agentsDir, "implementer.md"),
+      `---
+name: implementer
+description: Implementation agent
+---
+You are an implementer.
+`,
+    );
+
+    writeFileSync(
+      join(agentsDir, "teams.yaml"),
+      `team-a:
+  description: "Team A"
+  workspaceMode: shared
+  maxConcurrency: 1
+  members:
+    - researcher
+
+default-team:
+  description: "Default team"
+  default: true
+  workspaceMode: shared
+  maxConcurrency: 1
+  members:
+    - implementer
+
+team-b:
+  description: "Team B"
+  workspaceMode: shared
+  maxConcurrency: 1
+  members:
+    - researcher
+`,
+    );
+
+    try {
+      vi.resetModules();
+      const { default: freshFactory } = await import("./agent-teams.js");
+      const mock = makeMockApi();
+      freshFactory(mock.api as unknown as Parameters<typeof freshFactory>[0]);
+
+      const ctx = makeCtx({ cwd: tmpMultiDefault });
+      (ctx as Record<string, unknown>).model = { provider: "anthropic", id: "test-model" };
+      (ctx as Record<string, unknown>).getActiveTools = () => [];
+      await mock.invoke.sessionStart(ctx);
+
+      // Should have activated default-team and created a run immediately.
+      const runsDir = join(tmpMultiDefault, ".pi", "agent-teams", "runs", "default-team");
+      expect(existsSync(runsDir)).toBe(true);
+      const runDirs = readdirSync(runsDir);
+      expect(runDirs.length).toBeGreaterThan(0);
+
+      // Status bar should show default-team.
+      expect(ctx.ui.setStatus).toHaveBeenCalledWith(
+        "agent-team",
+        expect.stringContaining("default-team"),
+      );
+
+      // Notification should mention default-team and the run.
+      const notifyCalls = (ctx.ui.notify as ReturnType<typeof vi.fn>).mock.calls;
+      const notifyText = notifyCalls.map((c: unknown[]) => c[0] as string).join("\n");
+      expect(notifyText).toContain("default-team");
+      expect(notifyText).toContain("Run:");
+    } finally {
+      rmSync(tmpMultiDefault, { recursive: true, force: true });
+    }
+  });
+
+  it("multi-team repo with NO default marker defers run creation (non-regression)", async () => {
+    const tmpMultiNoDefault = mkdtempSync(join(tmpdir(), "agent-teams-multi-no-default-"));
+    const agentsDir = join(tmpMultiNoDefault, ".pi", "agents");
+    mkdirSync(agentsDir, { recursive: true });
+
+    writeFileSync(
+      join(agentsDir, "researcher.md"),
+      `---
+name: researcher
+description: Research agent
+---
+You are a researcher.
+`,
+    );
+
+    writeFileSync(
+      join(agentsDir, "implementer.md"),
+      `---
+name: implementer
+description: Implementation agent
+---
+You are an implementer.
+`,
+    );
+
+    writeFileSync(
+      join(agentsDir, "teams.yaml"),
+      `team-a:
+  description: "Team A"
+  workspaceMode: shared
+  maxConcurrency: 1
+  members:
+    - researcher
+
+team-b:
+  description: "Team B"
+  workspaceMode: shared
+  maxConcurrency: 1
+  members:
+    - implementer
+`,
+    );
+
+    try {
+      vi.resetModules();
+      const { default: freshFactory } = await import("./agent-teams.js");
+      const mock = makeMockApi();
+      freshFactory(mock.api as unknown as Parameters<typeof freshFactory>[0]);
+
+      const ctx = makeCtx({ cwd: tmpMultiNoDefault });
+      (ctx as Record<string, unknown>).model = { provider: "anthropic", id: "test-model" };
+      (ctx as Record<string, unknown>).getActiveTools = () => [];
+      await mock.invoke.sessionStart(ctx);
+
+      // Should activate first team (team-a) but NOT create a run directory yet.
+      const runsDir = join(tmpMultiNoDefault, ".pi", "agent-teams", "runs", "team-a");
+      // Run directory may exist but should be empty or non-existent.
+      if (existsSync(runsDir)) {
+        const runDirs = readdirSync(runsDir);
+        expect(runDirs.length).toBe(0);
+      }
+
+      // Status bar should still be set (team is activated).
+      expect(ctx.ui.setStatus).toHaveBeenCalledWith(
+        "agent-team",
+        expect.stringContaining("team-a"),
+      );
+
+      // Notification should mention team-a but tell user to use /team-select.
+      const notifyCalls = (ctx.ui.notify as ReturnType<typeof vi.fn>).mock.calls;
+      const notifyText = notifyCalls.map((c: unknown[]) => c[0] as string).join("\n");
+      expect(notifyText).toContain("team-a");
+      expect(notifyText).toContain("/team-select");
+      expect(notifyText).not.toContain("Run:");
+    } finally {
+      rmSync(tmpMultiNoDefault, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("team-handoffs — with handoffs", () => {
   it("shows handoff entries when they exist", async () => {
     const mock = setup();

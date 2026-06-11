@@ -23,6 +23,7 @@ interface RawTeam {
   members: string[];
   crossTeam: string[];
   cleanupWorktree?: string;
+  isDefault?: string;
 }
 
 /**
@@ -49,6 +50,7 @@ export function parseTeamsYaml(raw: string): Record<string, RawTeam> {
         members: [],
         crossTeam: [],
         cleanupWorktree: "false",
+        isDefault: "false",
       };
       currentField = null;
       continue;
@@ -65,6 +67,7 @@ export function parseTeamsYaml(raw: string): Record<string, RawTeam> {
       else if (key === "workspaceMode") teams[current].workspaceMode = value;
       else if (key === "maxConcurrency") teams[current].maxConcurrency = value;
       else if (key === "cleanupWorktree") teams[current].cleanupWorktree = value;
+      else if (key === "default") teams[current].isDefault = value;
       else if (key === "cross-team") { /* list items handled below */ }
       // "members:" with no value just sets the field context for list items
       continue;
@@ -131,6 +134,7 @@ export function loadTeams(
       members: validMembers,
       crossTeamMembers: validCrossTeam,
       cleanupWorktree: rt.cleanupWorktree === "true",
+      isDefault: rt.isDefault === "true",
     };
   }
 

@@ -1215,10 +1215,13 @@ ${agentCatalog()}`,
       );
     }
 
-    // Activate first team if available.
+    // Find default team if one is marked.
     const teamNames = Object.keys(allTeams);
+    const defaultTeamName = teamNames.find(name => allTeams[name].isDefault) ?? null;
+
+    // Activate first team if available, or the default team if marked.
     if (teamNames.length > 0) {
-      activateTeam(teamNames[0]);
+      activateTeam(defaultTeamName ?? teamNames[0]);
     }
 
     if (teamAgents.size === 0) {
@@ -1229,15 +1232,13 @@ ${agentCatalog()}`,
       return;
     }
 
-    // For single-team setups, create the run immediately so the user can
-    // start working without calling /team-select first (preserves existing
-    // single-team behaviour).
-    // For multi-team setups, defer run creation until the user explicitly
-    // picks a team via /team-select — creating one now would stamp all
-    // subsequent work under the first (auto-activated) team's directory
-    // even if the user selects a different team.
-    // run will be created when user selects a team via /team-select
-    if (teamNames.length === 1) {
+    // For single-team setups OR when a team is explicitly marked as default,
+    // create the run immediately so the user can start working without calling
+    // /team-select first.
+    // For multi-team setups without a default marker, defer run creation until
+    // the user explicitly picks a team via /team-select.
+    const shouldAutoStart = teamNames.length === 1 || defaultTeamName !== null;
+    if (shouldAutoStart) {
       currentRun = createRun(ctx.cwd, activeTeamName, "(goal will be set on first dispatch)");
       currentRunDir = runDir(ctx.cwd, activeTeamName, currentRun.runId);
     }

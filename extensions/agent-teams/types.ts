@@ -84,6 +84,9 @@ export interface TeamConfig {
   /** Remove the worktree directory (not the branch) when the run ends. Default: false.
    * In teams.yaml use `cleanupWorktree: true` (only the literal string "true" is accepted). */
   cleanupWorktree?: boolean;
+  /** When true, this team auto-activates at session start even in multi-team repos.
+   * In teams.yaml use `default: true` (only the literal string "true" is accepted). */
+  isDefault?: boolean;
 }
 
 /** Live state for one parallel team instance. */

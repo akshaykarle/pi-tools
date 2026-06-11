@@ -9,6 +9,7 @@ default-team:
   description: "Full cycle: brainstorm → plan (human-gated) → implement → verify → review"
   workspaceMode: shared
   maxConcurrency: 1
+  default: true
   members:
     - brainstormer
     - planner
