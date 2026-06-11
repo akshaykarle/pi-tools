@@ -35,6 +35,8 @@ export function appendHandoff(
     summary: string;
     artifacts?: string[];
     elapsedMs?: number;
+    /** Team instance for inner-team dispatches; absent for cross-team. */
+    instanceId?: number;
   },
 ): HandoffEntry {
   const entry: HandoffEntry = {
@@ -48,6 +50,7 @@ export function appendHandoff(
     summary: opts.summary,
     artifacts: opts.artifacts ?? [],
     elapsedMs: opts.elapsedMs,
+    ...(opts.instanceId !== undefined && { instanceId: opts.instanceId }),
   };
 
   // Append to NDJSON

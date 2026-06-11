@@ -93,6 +93,33 @@ my-team:
     const result = parseTeamsYaml(yaml);
     expect(result["my-team"].cleanupWorktree).toBe("false");
   });
+
+  it("parses cross-team: list", () => {
+    const yaml = `
+my-team:
+  description: "My team"
+  workspaceMode: shared
+  members:
+    - researcher
+  cross-team:
+    - judge-default
+`;
+    const result = parseTeamsYaml(yaml);
+    expect(result["my-team"].crossTeam).toEqual(["judge-default"]);
+    expect(result["my-team"].members).toEqual(["researcher"]);
+  });
+
+  it("defaults crossTeam to [] when cross-team: key is absent", () => {
+    const yaml = `
+my-team:
+  description: "My team"
+  workspaceMode: shared
+  members:
+    - researcher
+`;
+    const result = parseTeamsYaml(yaml);
+    expect(result["my-team"].crossTeam).toEqual([]);
+  });
 });
 
 describe("loadTeams", () => {
@@ -160,6 +187,62 @@ my-team:
     const agents = [fakeAgent("researcher")];
     const teams = loadTeams(tmpDir, agents);
     expect(teams["my-team"].cleanupWorktree).toBe(true);
+  });
+
+  it("populates crossTeamMembers from cross-team: key", () => {
+    const agentsDir = join(tmpDir, ".pi", "agents");
+    mkdirSync(agentsDir, { recursive: true });
+    writeFileSync(
+      join(agentsDir, "teams.yaml"),
+      `my-team:
+  description: "My team"
+  workspaceMode: shared
+  members:
+    - researcher
+  cross-team:
+    - judge-default
+`,
+    );
+    const agents = [fakeAgent("researcher"), fakeAgent("judge-default")];
+    const teams = loadTeams(tmpDir, agents);
+    expect(teams["my-team"].crossTeamMembers).toEqual(["judge-default"]);
+  });
+
+  it("filters unknown cross-team agent names", () => {
+    const agentsDir = join(tmpDir, ".pi", "agents");
+    mkdirSync(agentsDir, { recursive: true });
+    writeFileSync(
+      join(agentsDir, "teams.yaml"),
+      `my-team:
+  description: "My team"
+  workspaceMode: shared
+  members:
+    - researcher
+  cross-team:
+    - judge-default
+    - unknown-judge
+`,
+    );
+    const agents = [fakeAgent("researcher"), fakeAgent("judge-default")];
+    const teams = loadTeams(tmpDir, agents);
+    expect(teams["my-team"].crossTeamMembers).toEqual(["judge-default"]);
+  });
+
+  it("defaults crossTeamMembers to [] when key absent", () => {
+    const agentsDir = join(tmpDir, ".pi", "agents");
+    mkdirSync(agentsDir, { recursive: true });
+    writeFileSync(
+      join(agentsDir, "teams.yaml"),
+      `my-team:
+  description: "My team"
+  workspaceMode: shared
+  members:
+    - researcher
+`,
+    );
+    const agents = [fakeAgent("researcher")];
+    const teams = loadTeams(tmpDir, agents);
+    expect(teams["my-team"].crossTeamMembers).toEqual([]);
   });
 
   it("defaults workspaceMode to shared and maxConcurrency to 1", () => {

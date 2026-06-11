@@ -110,3 +110,45 @@ describe("loadHandoffs", () => {
     expect(entries[1].summary).toBe("Second");
   });
 });
+
+describe("instanceId in handoff entries", () => {
+  it("includes instanceId when provided", () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), "handoff-test-"));
+    try {
+      appendHandoff(tmpDir, {
+        type: "dispatch",
+        runId: "run-123",
+        fromAgent: "orchestrator",
+        toAgent: "implementer",
+        taskId: "task-1",
+        summary: "test",
+        instanceId: 2,
+      });
+      const entries = loadHandoffs(tmpDir);
+      expect(entries).toHaveLength(1);
+      expect(entries[0]!.instanceId).toBe(2);
+    } finally {
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it("omits instanceId for cross-team dispatches (when not provided)", () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), "handoff-test-"));
+    try {
+      appendHandoff(tmpDir, {
+        type: "dispatch",
+        runId: "run-123",
+        fromAgent: "orchestrator",
+        toAgent: "judge-default",
+        taskId: "task-1",
+        summary: "test",
+        // no instanceId
+      });
+      const entries = loadHandoffs(tmpDir);
+      expect(entries).toHaveLength(1);
+      expect(entries[0]!.instanceId).toBeUndefined();
+    } finally {
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+});

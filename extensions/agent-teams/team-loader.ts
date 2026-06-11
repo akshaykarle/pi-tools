@@ -21,6 +21,7 @@ interface RawTeam {
   workspaceMode: string;
   maxConcurrency: string;
   members: string[];
+  crossTeam: string[];
   cleanupWorktree?: string;
 }
 
@@ -46,6 +47,7 @@ export function parseTeamsYaml(raw: string): Record<string, RawTeam> {
         workspaceMode: "shared",
         maxConcurrency: "1",
         members: [],
+        crossTeam: [],
         cleanupWorktree: "false",
       };
       currentField = null;
@@ -55,7 +57,7 @@ export function parseTeamsYaml(raw: string): Record<string, RawTeam> {
     if (!current) continue;
 
     // Indented scalar field:  key: value
-    const scalarMatch = line.match(/^\s+([a-zA-Z_]+)\s*:\s*"?([^"]*?)"?\s*$/);
+    const scalarMatch = line.match(/^\s+([a-zA-Z_][a-zA-Z0-9_-]*)\s*:\s*"?([^"]*?)"?\s*$/);
     if (scalarMatch) {
       const [, key, value] = scalarMatch;
       currentField = key;
@@ -63,6 +65,7 @@ export function parseTeamsYaml(raw: string): Record<string, RawTeam> {
       else if (key === "workspaceMode") teams[current].workspaceMode = value;
       else if (key === "maxConcurrency") teams[current].maxConcurrency = value;
       else if (key === "cleanupWorktree") teams[current].cleanupWorktree = value;
+      else if (key === "cross-team") { /* list items handled below */ }
       // "members:" with no value just sets the field context for list items
       continue;
     }
@@ -71,6 +74,8 @@ export function parseTeamsYaml(raw: string): Record<string, RawTeam> {
     const listMatch = line.match(/^\s+-\s+(.+)$/);
     if (listMatch && currentField === "members") {
       teams[current].members.push(listMatch[1].trim());
+    } else if (listMatch && currentField === "cross-team") {
+      teams[current].crossTeam.push(listMatch[1].trim());
     }
   }
 
@@ -106,6 +111,10 @@ export function loadTeams(
       agentNames.has(m.toLowerCase()),
     );
 
+    const validCrossTeam = rt.crossTeam.filter((m) =>
+      agentNames.has(m.toLowerCase()),
+    );
+
     // Skip teams with no valid members.
     if (validMembers.length === 0) continue;
 
@@ -120,6 +129,7 @@ export function loadTeams(
       workspaceMode: wsMode,
       maxConcurrency: Number.isFinite(maxConc) && maxConc > 0 ? maxConc : 1,
       members: validMembers,
+      crossTeamMembers: validCrossTeam,
       cleanupWorktree: rt.cleanupWorktree === "true",
     };
   }

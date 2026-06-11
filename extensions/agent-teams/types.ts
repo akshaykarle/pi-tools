@@ -71,13 +71,33 @@ export interface TeamConfig {
   description: string;
   /** How agent workspaces are isolated. */
   workspaceMode: WorkspaceMode;
-  /** Maximum number of agents that can run in parallel. */
+  /**
+   * Upper-bound cap on how many team instances may be active simultaneously.
+   * The orchestrator may spin up fewer — the cap only prevents exceeding it.
+   * Previously controlled per-agent concurrency; now controls per-instance concurrency.
+   */
   maxConcurrency: number;
   /** Agent names that belong to this team (must match AgentDefinition.name). */
   members: string[];
+  /** Agents not bound to any team instance; dispatched at the orchestrator's discretion. */
+  crossTeamMembers: string[];
   /** Remove the worktree directory (not the branch) when the run ends. Default: false.
    * In teams.yaml use `cleanupWorktree: true` (only the literal string "true" is accepted). */
   cleanupWorktree?: boolean;
+}
+
+/** Live state for one parallel team instance. */
+export interface TeamInstance {
+  /** Numeric label (1-based). */
+  instanceId: number;
+  /** Absolute path to this instance's worktree (or projectCwd for shared mode). */
+  worktreePath: string;
+  /** Branch name (worktree mode only). */
+  branch?: string;
+  /** Number of agents currently running in this instance (may be >1 for parallel work). */
+  runningAgentCount: number;
+  /** Lifecycle status of this instance. */
+  status: "running" | "complete" | "failed";
 }
 
 // ── Handoff Log ──────────────────────────────────
@@ -105,6 +125,8 @@ export interface HandoffEntry {
   artifacts: string[];
   /** How long the dispatched agent ran (ms). Only set on completion/failure. */
   elapsedMs?: number;
+  /** Team instance this handoff belongs to (inner-team dispatches only; absent for cross-team). */
+  instanceId?: number;
 }
 
 // ── Run State ────────────────────────────────────

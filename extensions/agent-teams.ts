@@ -24,11 +24,13 @@ import { appendHandoff, loadHandoffs } from "./agent-teams/handoff-log.js";
 import { spawnAgent, resolveToolsList } from "./agent-teams/agent-runner.js";
 import { findSkillDir, readPiSkillDirs, readPiExtensionPaths } from "./agent-teams/skill-loader.js";
 import { detectIncompleteRuns, formatIncompleteRunsSummary } from "./agent-teams/crash-recovery.js";
+import { ConcurrencyManager } from "./agent-teams/concurrency-manager.js";
 import type {
   AgentDefinition,
   AgentRunResult,
   RunState,
   TeamConfig,
+  TeamInstance,
 } from "./agent-teams/types.js";
 
 // Re-export the git-worktree helpers so they're available if needed.
@@ -47,15 +49,18 @@ let activeTeamName = "";
 let activeTeam: TeamConfig | null = null;
 let currentRun: RunState | null = null;
 let currentRunDir = "";
-let currentRunWorktreePath: string | null = null;
-let currentRunWorktreeBranch: string | null = null;
 let projectCwd = "";
 
 /** Map of agent name (lowercase) → definition for the active team. */
 const teamAgents = new Map<string, AgentDefinition>();
 
-/** Track how many agents are currently running (for concurrency control). */
-let runningCount = 0;
+/** Concurrency gate — tracks active team instances against the team's cap. */
+let instanceConcurrency = new ConcurrencyManager(1);
+
+/** Live state of each team instance keyed by instanceId. */
+const teamInstances = new Map<number, TeamInstance>();
+/** Per-instance running agent count; when it hits 0 the instance slot is released. */
+const instanceAgentCount = new Map<number, number>();
 
 // ── Agent Panel State ─────────────────────────────
 /** Per-agent live state used to render the team panel widget. */
@@ -74,6 +79,10 @@ interface AgentPanelState {
   lastProgress?: string;
   /** Session file path (set at dispatch time for live token polling). */
   sessionFile?: string;
+  /** Team instance this agent belongs to (undefined for cross-team agents). */
+  instanceId?: number;
+  /** True for cross-team agents not bound to any instance. */
+  isCrossTeam?: boolean;
 }
 
 const agentPanel = new Map<string, AgentPanelState>();
@@ -215,8 +224,8 @@ function buildPanelLines(): string[] {
 
   const footer = `${ANSI_DIM}${"\u2500".repeat(width)}${ANSI_RESET}`;
 
-  const rows: string[] = [];
-  for (const [name, state] of agentPanel) {
+  // Helper: render a single agent row (shared by flat and grouped modes).
+  const buildAgentRow = (name: string, state: AgentPanelState): string => {
     const icon = state.status === "running" ? "\uD83D\uDFE2"
       : state.status === "dispatching" ? "\uD83D\uDFE1"
       : state.status === "done" ? "\u2705"
@@ -257,8 +266,65 @@ function buildPanelLines(): string[] {
       elapsedPart = `  ${ANSI_DIM}${fmtMs(Date.now() - state.startMs)}${ANSI_RESET}`;
     }
 
-    const row = `  ${icon}  ${rowColor}${nameStr}${ANSI_RESET}  ${ANSI_DIM}${modelPadded}${ANSI_RESET}  ${taskPart}${statsPart}${elapsedPart}`;
-    rows.push(row);
+    return `  ${icon}  ${rowColor}${nameStr}${ANSI_RESET}  ${ANSI_DIM}${modelPadded}${ANSI_RESET}  ${taskPart}${statsPart}${elapsedPart}`;
+  };
+
+  const useGrouped =
+    (activeTeam?.maxConcurrency ?? 1) > 1 ||
+    (activeTeam?.crossTeamMembers?.length ?? 0) > 0;
+
+  const rows: string[] = [];
+
+  if (useGrouped) {
+    // Separate inner-team entries from cross-team entries.
+    const innerTeamEntries: [string, AgentPanelState][] = [];
+    const crossTeamEntries: [string, AgentPanelState][] = [];
+
+    for (const entry of agentPanel) {
+      if (entry[1].isCrossTeam) {
+        crossTeamEntries.push(entry);
+      } else {
+        innerTeamEntries.push(entry);
+      }
+    }
+
+    // Group inner-team by instanceId.
+    const byInstance = new Map<number | undefined, [string, AgentPanelState][]>();
+    for (const entry of innerTeamEntries) {
+      const id = entry[1].instanceId;
+      const group = byInstance.get(id) ?? [];
+      group.push(entry);
+      byInstance.set(id, group);
+    }
+
+    // Sort: numeric instanceIds first (ascending), undefined at end.
+    const sortedKeys = [...byInstance.keys()].sort((a, b) => {
+      if (a === undefined) return 1;
+      if (b === undefined) return -1;
+      return a - b;
+    });
+
+    for (const id of sortedKeys) {
+      if (id !== undefined) {
+        rows.push(`  ${ANSI_DIM}Instance ${id}${ANSI_RESET}`);
+      }
+      for (const [name, state] of byInstance.get(id)!) {
+        rows.push(buildAgentRow(name, state));
+      }
+    }
+
+    // Cross-team section.
+    if (crossTeamEntries.length > 0) {
+      rows.push(`  ${ANSI_DIM}\u2500\u2500 Cross-team \u2500\u2500${ANSI_RESET}`);
+      for (const [name, state] of crossTeamEntries) {
+        rows.push(buildAgentRow(name, state));
+      }
+    }
+  } else {
+    // Flat rendering for simple single-instance teams.
+    for (const [name, state] of agentPanel) {
+      rows.push(buildAgentRow(name, state));
+    }
   }
 
   return [header, ...rows, footer];
@@ -293,6 +359,9 @@ function activateTeam(teamName: string): void {
   activeTeamName = teamName;
   activeTeam = allTeams[teamName] || null;
   teamAgents.clear();
+  teamInstances.clear();
+  instanceAgentCount.clear();
+  instanceConcurrency = new ConcurrencyManager(activeTeam?.maxConcurrency ?? 1);
 
   if (!activeTeam) return;
 
@@ -301,35 +370,66 @@ function activateTeam(teamName: string): void {
     const def = defsByName.get(member.toLowerCase());
     if (def) teamAgents.set(def.name.toLowerCase(), def);
   }
+  // Also register cross-team agent definitions so they can be dispatched.
+  for (const member of activeTeam.crossTeamMembers) {
+    const def = defsByName.get(member.toLowerCase());
+    if (def) teamAgents.set(def.name.toLowerCase(), def);
+  }
 }
 
 /**
- * Resets shared worktree state and, when `ctx` is provided, notifies the user
- * of the preserved branch name. If `cleanupWorktree` is enabled on the active
- * team, also removes the worktree checkout directory (branch is kept).
+ * Cleans up all per-instance worktrees for the current run. When `ctx` is
+ * provided, notifies the user of preserved branches. If `cleanupWorktree` is
+ * enabled on the active team, also removes the worktree checkout directories
+ * (branches are kept).
  */
 function cleanupRunWorktree(ctx?: ExtensionContext): void {
-  if (!currentRunWorktreePath) return;
+  if (teamInstances.size === 0) return;
   if (!projectCwd) return;
-  const path = currentRunWorktreePath;
-  const branch = currentRunWorktreeBranch;
-  currentRunWorktreePath = null;
-  currentRunWorktreeBranch = null;
-  try {
-    if (activeTeam?.cleanupWorktree) {
-      const repoRoot = findGitRoot(projectCwd);
-      removeWorktree(repoRoot, path, { deleteBranch: false });
+
+  const preservedBranches: string[] = [];
+
+  for (const inst of teamInstances.values()) {
+    if (!inst.branch) continue;
+    try {
+      if (activeTeam?.cleanupWorktree) {
+        const repoRoot = findGitRoot(projectCwd);
+        removeWorktree(repoRoot, inst.worktreePath, { deleteBranch: false });
+      }
+      preservedBranches.push(inst.branch);
+    } catch {
+      // Best-effort; don't crash on cleanup failure.
     }
-    if (ctx && branch) {
-      ctx.ui.notify(
-        `Worktree branch preserved: ${branch}\n` +
-        `Review and merge: git merge ${branch}`,
-        "info",
-      );
-    }
-  } catch {
-    // Best-effort; don't crash on cleanup failure.
   }
+
+  teamInstances.clear();
+  instanceAgentCount.clear();
+  instanceConcurrency.reset();
+
+  if (ctx && preservedBranches.length > 0) {
+    ctx.ui.notify(
+      preservedBranches.map((b) => `Worktree branch preserved: ${b}\nReview and merge: git merge ${b}`).join("\n"),
+      "info",
+    );
+  }
+}
+
+/**
+ * Build a manifest of all known team instances for cross-team agents.
+ */
+function buildInstanceManifest(): string {
+  if (teamInstances.size === 0) return "";
+  const lines: string[] = ["\n## Team instances\n"];
+  for (const [id, inst] of [...teamInstances.entries()].sort((a, b) => a[0] - b[0])) {
+    lines.push(`Instance ${id}  [status: ${inst.status}]`);
+    lines.push(`  Worktree: ${inst.worktreePath}`);
+    for (const member of (activeTeam?.members ?? [])) {
+      const wp = getAgentWorkspacePaths(currentRunDir, member, id);
+      lines.push(`  ${member}: ${wp.outputFile}`);
+    }
+    lines.push("");
+  }
+  return lines.join("\n");
 }
 
 /**
@@ -342,6 +442,7 @@ async function dispatchAgentForTask(
   ctx: ExtensionContext,
   pi: ExtensionAPI,
   modelOverride?: string,
+  instanceId?: number,
 ): Promise<AgentRunResult> {
   const key = agentName.toLowerCase();
   const agentDef = teamAgents.get(key);
@@ -369,17 +470,24 @@ async function dispatchAgentForTask(
     };
   }
 
-  // Check concurrency limit.
-  if (activeTeam && runningCount >= activeTeam.maxConcurrency) {
-    const ps2 = agentPanel.get(key) ?? { status: "idle" as const };
-    ps2.status = "error";
-    agentPanel.set(key, ps2);
-    updatePanel(ctx);
-    return {
-      output: `Concurrency limit reached (${activeTeam.maxConcurrency}). Wait for a running agent to finish.`,
-      exitCode: 1,
-      elapsedMs: 0,
-    };
+  // Determine if this agent is a cross-team agent.
+  const isCrossTeam = (activeTeam?.crossTeamMembers ?? []).includes(agentName.toLowerCase());
+
+  // Resolve effective instance ID for inner-team agents.
+  let effectiveInstanceId: number | undefined;
+  if (!isCrossTeam) {
+    effectiveInstanceId = instanceId ?? ((activeTeam?.maxConcurrency ?? 1) === 1 ? 1 : undefined);
+    if (effectiveInstanceId === undefined) {
+      const psE = agentPanel.get(key) ?? { status: "idle" as const };
+      psE.status = "error";
+      agentPanel.set(key, psE);
+      updatePanel(ctx);
+      return {
+        output: "teamInstance is required when maxConcurrency > 1",
+        exitCode: 1,
+        elapsedMs: 0,
+      };
+    }
   }
 
   // Mark task as in-progress.
@@ -388,50 +496,88 @@ async function dispatchAgentForTask(
     assignee: agentName,
   });
 
-  // Create workspace for this agent.
-  const workspace = createAgentWorkspace(currentRunDir, agentName);
-
-  // Determine working directory based on workspace mode.
+  // Determine working directory and set up instance tracking.
   let agentCwd = projectCwd;
-  if (activeTeam?.workspaceMode === "worktree") {
-    try {
-      const repoRoot = findGitRoot(projectCwd);
-      if (currentRunWorktreePath) {
-        // Reuse the shared worktree already created for this run.
-        agentCwd = currentRunWorktreePath;
-      } else {
-        // First agent in this run — create the shared worktree.
-        if (!isCleanWorkingTree(repoRoot)) {
-          const ps3 = agentPanel.get(key) ?? { status: "idle" as const };
-          ps3.status = "error";
-          agentPanel.set(key, ps3);
+  let dispatchInstanceId: number | undefined;
+
+  if (isCrossTeam) {
+    // Cross-team agents always work from the project root.
+    agentCwd = projectCwd;
+  } else {
+    // Inner-team: resolve or create the team instance.
+    dispatchInstanceId = effectiveInstanceId!;
+    const isNewInstance = !teamInstances.has(dispatchInstanceId);
+
+    if (isNewInstance) {
+      // Concurrency gate: only fired when creating a new instance.
+      if (!instanceConcurrency.canAcquire()) {
+        const psG = agentPanel.get(key) ?? { status: "idle" as const };
+        psG.status = "error";
+        agentPanel.set(key, psG);
+        updatePanel(ctx);
+        return {
+          output: `Team instance cap (${instanceConcurrency.limit}) reached. Wait for a running instance to complete.`,
+          exitCode: 1,
+          elapsedMs: 0,
+        };
+      }
+
+      // Create worktree for this instance if required.
+      let instanceWorktreeBranch: string | undefined;
+      if (activeTeam?.workspaceMode === "worktree") {
+        try {
+          const repoRoot = findGitRoot(projectCwd);
+          if (!isCleanWorkingTree(repoRoot)) {
+            const psW = agentPanel.get(key) ?? { status: "idle" as const };
+            psW.status = "error";
+            agentPanel.set(key, psW);
+            updatePanel(ctx);
+            return {
+              output: "Cannot create worktree: working tree has uncommitted changes. Commit or stash first.",
+              exitCode: 1,
+              elapsedMs: 0,
+            };
+          }
+          const wt = createWorktree(repoRoot, `${currentRun.runId}-${dispatchInstanceId}`);
+          agentCwd = wt.path;
+          instanceWorktreeBranch = wt.branch;
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          const psWE = agentPanel.get(key) ?? { status: "idle" as const };
+          psWE.status = "error";
+          agentPanel.set(key, psWE);
           updatePanel(ctx);
           return {
-            output: "Cannot create worktree: working tree has uncommitted changes. Commit or stash first.",
+            output: `Failed to create worktree: ${msg}.`,
             exitCode: 1,
             elapsedMs: 0,
           };
         }
-        // If createWorktree throws, currentRunWorktreePath stays null and
-        // the next dispatch will retry — no stale state is left behind.
-        const wt = createWorktree(repoRoot, currentRun.runId);
-        currentRunWorktreePath = wt.path;
-        currentRunWorktreeBranch = wt.branch;
-        agentCwd = wt.path;
       }
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      const ps4 = agentPanel.get(key) ?? { status: "idle" as const };
-      ps4.status = "error";
-      agentPanel.set(key, ps4);
-      updatePanel(ctx);
-      return {
-        output: `Failed to create worktree: ${msg}.`,
-        exitCode: 1,
-        elapsedMs: 0,
-      };
+
+      // Register the new instance and acquire a concurrency slot.
+      teamInstances.set(dispatchInstanceId, {
+        instanceId: dispatchInstanceId,
+        worktreePath: agentCwd,
+        branch: instanceWorktreeBranch,
+        runningAgentCount: 0,
+        status: "running",
+      });
+      instanceConcurrency.acquire();
+    } else {
+      // Existing instance: reuse the worktree path.
+      agentCwd = teamInstances.get(dispatchInstanceId)!.worktreePath;
     }
+
+    // Track per-instance agent count.
+    instanceAgentCount.set(dispatchInstanceId, (instanceAgentCount.get(dispatchInstanceId) ?? 0) + 1);
+    const inst = teamInstances.get(dispatchInstanceId)!;
+    inst.runningAgentCount++;
   }
+
+  // Create workspace for this agent (scoped to instance when inner-team).
+  const workspace = createAgentWorkspace(currentRunDir, agentName, dispatchInstanceId);
+  const workspacePaths = getAgentWorkspacePaths(currentRunDir, agentName, dispatchInstanceId);
 
   // Log dispatch handoff.
   appendHandoff(currentRunDir, {
@@ -441,16 +587,32 @@ async function dispatchAgentForTask(
     toAgent: agentName,
     taskId,
     summary: taskDescription,
+    ...(dispatchInstanceId !== undefined ? { instanceId: dispatchInstanceId } : {}),
   });
 
   // Build the task prompt including context about the run and workspace.
-  const contextPrefix = [
+  const contextLines = [
     `# Agent Team Task`,
     `Run ID: ${currentRun.runId}`,
     `Team: ${currentRun.team}`,
     `Task ID: ${taskId}`,
     `Your workspace: ${workspace.root}`,
     `Working directory: ${agentCwd}`,
+  ];
+
+  if (!isCrossTeam && dispatchInstanceId !== undefined) {
+    contextLines.push(
+      `Team instance: ${dispatchInstanceId} (cap: ${activeTeam?.maxConcurrency ?? 1} concurrent instances)`,
+      `Working directory (shared with your team instance): ${agentCwd}`,
+    );
+  }
+
+  const manifest = isCrossTeam ? buildInstanceManifest() : "";
+  if (isCrossTeam && manifest) {
+    contextLines.push(manifest);
+  }
+
+  contextLines.push(
     "",
     "## Instructions",
     "- Write your working notes to your workspace notes file.",
@@ -458,8 +620,9 @@ async function dispatchAgentForTask(
     "- Stay focused on the task described below.",
     "",
     "## Task",
-  ].join("\n");
+  );
 
+  const contextPrefix = contextLines.join("\n");
   const fullPrompt = `${contextPrefix}\n${taskDescription}`;
 
   // Resolve model: per-dispatch override > agent frontmatter > parent session model.
@@ -524,13 +687,9 @@ async function dispatchAgentForTask(
     }
   }
 
-  // Spawn the agent.
-  runningCount++;
-
   // ── Agent panel state: dispatching ───────────────────────────────────────
   const dispatchStartMs = Date.now();
   const taskTitle = getTask(currentRunDir, taskId)?.title;
-  const workspacePaths = getAgentWorkspacePaths(currentRunDir, agentName);
   {
     const ps = agentPanel.get(key) ?? { status: "idle" as const };
     ps.status = "dispatching";
@@ -541,6 +700,8 @@ async function dispatchAgentForTask(
     ps.totalTokens = undefined;
     ps.lastProgress = undefined;
     ps.sessionFile = workspacePaths.sessionFile;
+    ps.instanceId = dispatchInstanceId;
+    ps.isCrossTeam = isCrossTeam;
     agentPanel.set(key, ps);
   }
   startPanelTimer(ctx);
@@ -589,8 +750,9 @@ async function dispatchAgentForTask(
       toAgent: "orchestrator",
       taskId,
       summary: truncatedOutput || "(no output)",
-      artifacts: [`workspaces/${agentName}/output.md`],
+      artifacts: [workspacePaths.outputFile],
       elapsedMs: result.elapsedMs,
+      ...(dispatchInstanceId !== undefined ? { instanceId: dispatchInstanceId } : {}),
     });
 
     // Update task status.
@@ -601,8 +763,19 @@ async function dispatchAgentForTask(
 
     return result;
   } finally {
-    runningCount--;
-    if (runningCount === 0) stopPanelTimer();
+    if (!isCrossTeam && dispatchInstanceId !== undefined) {
+      const newAgentCount = Math.max(0, (instanceAgentCount.get(dispatchInstanceId) ?? 1) - 1);
+      instanceAgentCount.set(dispatchInstanceId, newAgentCount);
+      const inst2 = teamInstances.get(dispatchInstanceId);
+      if (inst2) {
+        inst2.runningAgentCount = Math.max(0, inst2.runningAgentCount - 1);
+        if (newAgentCount === 0) {
+          instanceConcurrency.release();
+          inst2.status = "complete";
+        }
+      }
+    }
+    if (instanceConcurrency.count === 0) stopPanelTimer();
     updatePanel(ctx);
   }
 }
@@ -628,7 +801,7 @@ export default function (pi: ExtensionAPI): void {
       "Break work into focused sub-tasks and dispatch to the right specialist.",
       "Always create tasks on the task board before dispatching an agent.",
       "Review agent results before dispatching follow-up work.",
-      "You can dispatch multiple agents in parallel up to the team's maxConcurrency limit.",
+      "maxConcurrency is an upper-bound cap on parallel team instances — you can spin up fewer. Agents within an instance may run in parallel or sequentially at your discretion.",
     ],
     parameters: Type.Object({
       agent: Type.String({ description: "Agent name (case-insensitive, e.g. 'researcher')" }),
@@ -638,14 +811,21 @@ export default function (pi: ExtensionAPI): void {
         description:
           "Model override for this dispatch (e.g. 'anthropic/claude-haiku-4-5'). Defaults to the agent's configured model or the session model.",
       })),
+      teamInstance: Type.Optional(Type.Number({
+        description:
+          "Team instance number (1-based). Required for inner-team agents when maxConcurrency > 1. " +
+          "Omit for cross-team agents (judge etc.) — they receive a manifest of all known instances. " +
+          "Defaults to 1 when maxConcurrency is 1 (backwards compatible).",
+      })),
     }),
 
     async execute(_toolCallId, params, _signal, onUpdate, ctx) {
-      const { agent, taskId, task, model } = params as {
+      const { agent, taskId, task, model, teamInstance } = params as {
         agent: string;
         taskId: string;
         task: string;
         model?: string;
+        teamInstance?: number;
       };
 
       if (onUpdate) {
@@ -656,7 +836,7 @@ export default function (pi: ExtensionAPI): void {
       }
 
       try {
-        const result = await dispatchAgentForTask(agent, taskId, task, ctx, pi, model);
+        const result = await dispatchAgentForTask(agent, taskId, task, ctx, pi, model, teamInstance);
         const truncated =
           result.output.length > 8000
             ? result.output.slice(0, 8000) + "\n\n... [truncated]"
@@ -711,7 +891,7 @@ export default function (pi: ExtensionAPI): void {
         );
         const members = Array.from(teamAgents.values()).map((a) => displayName(a.name)).join(", ");
         ctx.ui.notify(
-          `Team: ${activeTeamName}\nMembers: ${members}\nWorkspace: ${activeTeam?.workspaceMode}\nMax concurrency: ${activeTeam?.maxConcurrency}`
+          `Team: ${activeTeamName}\nMembers: ${members}\nWorkspace: ${activeTeam?.workspaceMode}\nMax concurrent instances (cap): ${activeTeam?.maxConcurrency}`
             + (currentRun ? `\nRun: ${currentRun.runId}` : ""),
           "info",
         );
@@ -769,6 +949,13 @@ export default function (pi: ExtensionAPI): void {
         agentPanel.set(memberName.toLowerCase(), {
           status: "idle",
           model: def?.model?.split("/").pop(),
+        });
+      }
+      // Also seed cross-team members in the panel.
+      for (const memberName of (activeTeam?.crossTeamMembers ?? [])) {
+        agentPanel.set(memberName.toLowerCase(), {
+          status: "idle",
+          isCrossTeam: true,
         });
       }
       if (panelCtx) updatePanel(panelCtx);
@@ -927,9 +1114,12 @@ export default function (pi: ExtensionAPI): void {
   pi.on("before_agent_start", async (_event, _ctx) => {
     if (teamAgents.size === 0) return undefined;
 
-    const teamMembers = Array.from(teamAgents.values())
+    const innerMembers = Array.from(teamAgents.values())
+      .filter((a) => !(activeTeam?.crossTeamMembers ?? []).includes(a.name.toLowerCase()))
       .map((a) => displayName(a.name))
       .join(", ");
+
+    const crossTeamList = (activeTeam?.crossTeamMembers ?? []).join(", ") || "none";
 
     return {
       systemPrompt: `You are an orchestrator agent. You coordinate a team of specialist agents to accomplish tasks.
@@ -937,9 +1127,10 @@ You do NOT have direct access to the codebase. You MUST delegate all work throug
 agents using the dispatch_agent tool, and manage work using the manage_tasks tool.
 
 ## Active Team: ${activeTeamName}
-Members: ${teamMembers}
+Members: ${innerMembers}
+Cross-team agents: ${crossTeamList}
 Workspace mode: ${activeTeam?.workspaceMode ?? "shared"}
-Max concurrent agents: ${activeTeam?.maxConcurrency ?? 1}
+Max concurrent team instances (cap): ${activeTeam?.maxConcurrency ?? 1}
 ${currentRun ? `Current run: ${currentRun.runId}` : ""}
 
 ## How to Work
@@ -947,7 +1138,7 @@ ${currentRun ? `Current run: ${currentRun.runId}` : ""}
 2. Use manage_tasks (add or add_batch) to create tasks on the shared board with dependencies
 3. Dispatch agents to work on tasks using dispatch_agent (provide the task ID)
 4. Review results and dispatch follow-up work if needed
-5. You can dispatch up to ${activeTeam?.maxConcurrency ?? 1} agents in parallel — use parallel dispatch for independent tasks
+5. maxConcurrency (${activeTeam?.maxConcurrency ?? 1}) is the cap on parallel team instances — agents within an instance may also run in parallel
 6. Summarize the outcome for the user when all tasks are complete
 
 ## Rules
@@ -957,6 +1148,8 @@ ${currentRun ? `Current run: ${currentRun.runId}` : ""}
 - You can dispatch the same agent multiple times with different tasks
 - Keep tasks focused — one clear objective per dispatch
 - Check task dependencies before dispatching — don't start a task whose dependencies aren't done
+- For inner-team agents: always specify teamInstance (1-based); agents in the same instance share a worktree
+- For cross-team agents (${crossTeamList}): omit teamInstance — they receive an instance manifest at dispatch time
 
 ## Agents
 
@@ -1019,6 +1212,13 @@ ${agentCatalog()}`,
         model: def?.model?.split("/").pop(),
       });
     }
+    // Also seed cross-team members in the panel.
+    for (const memberName of (activeTeam?.crossTeamMembers ?? [])) {
+      agentPanel.set(memberName.toLowerCase(), {
+        status: "idle",
+        isCrossTeam: true,
+      });
+    }
     updatePanel(ctx);
 
     // Lock down to orchestrator-only tools and redirect todos to run dir.
@@ -1041,7 +1241,7 @@ ${agentCatalog()}`,
       `Agent Teams loaded!\n` +
         `Team: ${activeTeamName} (${members})\n` +
         `Workspace: ${activeTeam?.workspaceMode}\n` +
-        `Max concurrency: ${activeTeam?.maxConcurrency}\n` +
+        `Max concurrent instances (cap): ${activeTeam?.maxConcurrency}\n` +
         (currentRun
           ? `Run: ${currentRun.runId}\n\n`
           : `Use /team-select to begin working with a team\n\n`) +

@@ -11,6 +11,10 @@ agents run in worktrees, the judge is a regular read-only agent, and the task bo
 
 ---
 
+> **`maxConcurrency` in `teams.yaml`** is an **upper-bound cap on concurrent team instances**, not on individual agents. Setting `maxConcurrency: 3` means at most 3 complete team pipelines may run simultaneously — the orchestrator may spin up fewer. Agents within the same instance can run in parallel at the orchestrator's discretion.
+
+---
+
 ## When to file a task
 
 **Yes, file a task when:**
@@ -288,8 +292,13 @@ Example team configuration (`.pi/agents/teams.yaml` entry):
 ```yaml
 backlog-runner:
   workspaceMode: worktree
-  maxConcurrency: 3
-  members: [implementer, judge-default]
+  maxConcurrency: 3          # upper-bound cap on parallel team instances
+  members:                   # inner-team: share one worktree per instance
+    - researcher
+    - implementer
+    - reviewer
+  cross-team:                # not bound to any instance; dispatched at orchestrator's discretion
+    - judge-default
 ```
 
 ---
@@ -450,6 +459,23 @@ treating the backlog file as the source of truth directly.
   logic, output format.
 - `task-finalize` — champion branch → clean independent PR branches from merge-base,
   mirroring `autoresearch-finalize`.
+
+---
+
+## Team configuration (`teams.yaml`)
+
+### `cross-team:` agents
+
+Agents listed under `cross-team:` are not bound to any team instance. Unlike `members:` agents, they:
+- Are dispatched with `dispatch_agent` **without** a `teamInstance` parameter
+- Automatically receive a manifest of all known team instances at dispatch time (worktree paths, statuses, agent output paths)
+- Can be dispatched at any point: before, during, or after inner-team instances
+- Are **not** subject to the `maxConcurrency` instance cap
+
+**Example use cases:**
+- `judge-default`: dispatched after all instances complete to rank and score outputs
+- `product-manager`: dispatched before instances to produce per-instance task briefs
+- `team-lead`: dispatched concurrently with instances to monitor cross-stream progress
 
 ---
 

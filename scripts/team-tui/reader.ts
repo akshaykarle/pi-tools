@@ -81,8 +81,9 @@ export function loadTeamsYaml(cwd: string): Map<string, TeamConfig> {
   const lines = content.split("\n");
 
   let currentTeam: string | null = null;
-  let currentConfig: Partial<TeamConfig> & { members?: string[] } = {};
+  let currentConfig: Partial<TeamConfig> & { members?: string[]; crossTeamMembers?: string[] } = {};
   let inMembers = false;
+  let inCrossTeam = false;
 
   const flush = () => {
     if (currentTeam && currentConfig.description !== undefined) {
@@ -92,6 +93,7 @@ export function loadTeamsYaml(cwd: string): Map<string, TeamConfig> {
         workspaceMode: (currentConfig.workspaceMode as "shared" | "worktree") ?? "shared",
         maxConcurrency: currentConfig.maxConcurrency ?? 2,
         members: currentConfig.members ?? [],
+        crossTeamMembers: currentConfig.crossTeamMembers ?? [],
       });
     }
   };
@@ -104,6 +106,7 @@ export function loadTeamsYaml(cwd: string): Map<string, TeamConfig> {
       currentTeam = teamMatch[1]!;
       currentConfig = {};
       inMembers = false;
+      inCrossTeam = false;
       continue;
     }
     if (!currentTeam) continue;
@@ -115,23 +118,38 @@ export function loadTeamsYaml(cwd: string): Map<string, TeamConfig> {
       continue;
     }
 
-    // Key-value pairs inside a team
-    const kvMatch = line.match(/^\s{2}(\w+):\s*(.*)$/);
-    if (!kvMatch) { inMembers = false; continue; }
+    // cross-team list item
+    if (inCrossTeam && line.match(/^\s+-\s+(.+)$/)) {
+      const member = line.match(/^\s+-\s+(.+)$/)![1]!.trim();
+      (currentConfig.crossTeamMembers ??= []).push(member);
+      continue;
+    }
+
+    // Key-value pairs inside a team (allow hyphens in keys, e.g. cross-team)
+    const kvMatch = line.match(/^\s{2}([a-zA-Z][\w-]*):\s*(.*)$/);
+    if (!kvMatch) { inMembers = false; inCrossTeam = false; continue; }
     const [, key, val] = kvMatch as [string, string, string];
 
     if (key === "members") {
       currentConfig.members = [];
       inMembers = true;
-    } else if (key === "maxConcurrency") {
-      currentConfig.maxConcurrency = parseInt(val, 10);
+      inCrossTeam = false;
+    } else if (key === "cross-team") {
+      currentConfig.crossTeamMembers = [];
+      inCrossTeam = true;
       inMembers = false;
+    } else if (key === "maxConcurrency") {
+      currentConfig.maxConcurrency = parseInt(val, 10); // upper-bound cap on concurrent team instances (not per-agent)
+      inMembers = false;
+      inCrossTeam = false;
     } else if (key === "workspaceMode") {
       currentConfig.workspaceMode = val.trim() as "shared" | "worktree";
       inMembers = false;
+      inCrossTeam = false;
     } else if (key === "description") {
       currentConfig.description = val.trim().replace(/^"|"$/g, "");
       inMembers = false;
+      inCrossTeam = false;
     }
   }
   flush();

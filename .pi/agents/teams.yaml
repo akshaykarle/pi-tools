@@ -36,9 +36,10 @@ nano-team:
 backlog-runner:
   description: "Product-loop team: competing teams evaluated by a read-only judge"
   workspaceMode: worktree
-  maxConcurrency: 3
+  maxConcurrency: 3  # upper-bound cap on concurrent team instances (not per-agent)
   members:
     - researcher
     - implementer
     - reviewer
+  cross-team:  # not bound to any instance; dispatched at orchestrator's discretion
     - judge-default

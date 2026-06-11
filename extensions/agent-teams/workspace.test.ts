@@ -38,3 +38,23 @@ describe("getAgentWorkspacePaths", () => {
     expect(paths.root).toBe(join(tmpDir, "workspaces", "phantom"));
   });
 });
+
+describe("instanceId suffix", () => {
+  it("createAgentWorkspace with instanceId uses agent-instance dir name", () => {
+    const paths = createAgentWorkspace(tmpDir, "researcher", 2);
+    expect(paths.root).toMatch(/workspaces[/\\]researcher-2$/);
+    expect(paths.sessionFile).toMatch(/researcher-2[/\\]session\.json$/);
+  });
+
+  it("getAgentWorkspacePaths with instanceId uses agent-instance dir name", () => {
+    const paths = getAgentWorkspacePaths(tmpDir, "researcher", 1);
+    expect(paths.root).toMatch(/workspaces[/\\]researcher-1$/);
+  });
+
+  it("omitting instanceId preserves original path (no suffix)", () => {
+    const paths = getAgentWorkspacePaths(tmpDir, "researcher");
+    expect(paths.root).toMatch(/workspaces[/\\]researcher$/);
+    // should not have a numeric suffix at all
+    expect(paths.root).not.toMatch(/researcher-\d+$/);
+  });
+});
