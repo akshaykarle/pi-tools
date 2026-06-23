@@ -100,7 +100,7 @@ npm install
 - The `-u` flag stands for `--upgrade` and **rewrites `package.json`** in place with the latest version numbers.
 - Always run `npm test` after upgrading to catch any regressions.
 
-⚠️ **Caution:** Major version bumps may contain breaking changes. Review changelogs before upgrading, especially for core dependencies like `@mariozechner/pi-coding-agent` and `@anthropic-ai/sandbox-runtime`.
+⚠️ **Caution:** Major version bumps may contain breaking changes. Review changelogs before upgrading, especially for core dependencies like `@earendil-works/pi-coding-agent` and `@anthropic-ai/sandbox-runtime`.
 
 ### Testing
 
@@ -125,7 +125,7 @@ scripts/team-tui/  # TUI dashboard for monitoring agent-teams runs
 ### Conventions
 
 - ESM-only — imports between local TS files use `.js` extensions (`tsconfig.json` uses `module: ES2022`, `moduleResolution: bundler`).
-- Never import implementation details from `@mariozechner/pi-coding-agent` — only its public API surface (it's a `peerDependency`).
+- Never import implementation details from `@earendil-works/pi-coding-agent` — only its public API surface (it's a `peerDependency`).
 - Runtime state in `.pi/agent-teams`, `.pi/plans`, `.pi/todos` is git-ignored.
 - Publish is automated: GitHub release → `.github/workflows/publish.yml` → npm with provenance.
 

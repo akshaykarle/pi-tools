@@ -6,8 +6,8 @@
 // Usage: loaded automatically when listed in pi.extensions in package.json.
 // Keyboard shortcuts can be overridden via <agentDir>/extensions/backlog-dashboard.json.
 
-import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
-import { getAgentDir } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { loadDashboardConfig } from "./config.js";
 import { readDashboardState, watchBacklogDir } from "./reader.js";
 import { renderWidgetLine, renderExpandedView } from "./widget.js";

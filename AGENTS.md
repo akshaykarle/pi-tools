@@ -4,7 +4,7 @@ This file provides guidance to AI coding assistants when working with code in th
 
 ## What this is
 
-`@akshaykarle/pi-tools` — a package of extensions and skills for the **pi coding agent** (`@mariozechner/pi-coding-agent`). Extensions are TypeScript modules that hook into pi's tool-call lifecycle; skills are progressive-disclosure markdown files. Published to npm as a `pi-package`.
+`@akshaykarle/pi-tools` — a package of extensions and skills for the **pi coding agent** (`@earendil-works/pi-coding-agent`). Extensions are TypeScript modules that hook into pi's tool-call lifecycle; skills are progressive-disclosure markdown files. Published to npm as a `pi-package`.
 
 ## Commands
 
@@ -92,7 +92,7 @@ Key invariants:
 - Tests live next to source: `foo.ts` + `foo.test.ts`. Vitest excludes `node_modules`, `dist`, `.pi`, `.direnv`.
 - Module imports use `.js` extensions even from `.ts` (ESM bundler resolution; `tsconfig.json` `module: ES2022`, `moduleResolution: bundler`).
 - Internal helpers exposed for tests via a `__testing__` export object (see `sandbox.ts`).
-- `peerDependencies: @mariozechner/pi-coding-agent` — never import implementation details, only types/public API surface.
+- `peerDependencies: @earendil-works/pi-coding-agent` — never import implementation details, only types/public API surface.
 - `.gitignore` excludes `.pi/agent-teams`, `.pi/plans`, `.pi/todos` — these are runtime state, not config.
 - Build artefacts (`*.js`, `*.d.ts`, `*.js.map`) are gitignored but published from `dist/` per `package.json files`.
 - **Test every call-site, not just the function.** When a helper is called from N places, write N tests — one per call-site. A plan step that says "call X at every Y" is an N-site obligation: the test spec must list a case for each site explicitly. A passing test on one path gives no signal about sibling paths; untested call-sites must be flagged as explicitly out-of-scope, not left as implicit gaps.

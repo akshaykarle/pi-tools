@@ -14,10 +14,10 @@ import {
 } from "./config.js";
 
 // Tests stub PI_CODING_AGENT_DIR via vi.stubEnv and stub getAgentDir via vi.mock.
-// getAgentDir is imported by config.ts from @mariozechner/pi-coding-agent,
+// getAgentDir is imported by config.ts from @earendil-works/pi-coding-agent,
 // so we mock it at the module level.
 
-vi.mock("@mariozechner/pi-coding-agent", () => ({
+vi.mock("@earendil-works/pi-coding-agent", () => ({
   getAgentDir: () => process.env.__TEST_AGENT_DIR__ ?? "/tmp/test-agent-dir",
 }));
 

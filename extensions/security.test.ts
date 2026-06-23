@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { makeCtx, makeMockApi } from "./__tests__/test-utils.js";
 
-vi.mock("@mariozechner/pi-coding-agent", () => ({
+vi.mock("@earendil-works/pi-coding-agent", () => ({
   // Surface PI_CODING_AGENT_DIR via the same helper security.ts uses.
   getAgentDir: () => process.env.PI_CODING_AGENT_DIR ?? "",
 }));

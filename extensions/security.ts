@@ -1,5 +1,5 @@
 import { basename } from "node:path";
-import { type ExtensionAPI, getAgentDir } from "@mariozechner/pi-coding-agent";
+import { type ExtensionAPI, getAgentDir } from "@earendil-works/pi-coding-agent";
 
 // Profile-aware agent dir name. PI_CODING_AGENT_DIR is set by the user's
 // fish aliases (~/.pi-personal, ~/.pi-sahaj, ~/.pi-client), so the basename

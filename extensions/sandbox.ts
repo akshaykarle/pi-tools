@@ -25,10 +25,10 @@ import {
   type ExtensionAPI,
   type ExtensionContext,
   isToolCallEventType,
-} from "@mariozechner/pi-coding-agent";
-import type { BashOperations } from "@mariozechner/pi-coding-agent";
+} from "@earendil-works/pi-coding-agent";
+import type { BashOperations } from "@earendil-works/pi-coding-agent";
 
-// BashResult is exported from "@mariozechner/pi-coding-agent/core" but not from
+// BashResult is exported from "@earendil-works/pi-coding-agent/core" but not from
 // the top-level entry. Mirror the shape locally — only used to build a
 // fail-closed UserBashEventResult.
 interface BashResult {

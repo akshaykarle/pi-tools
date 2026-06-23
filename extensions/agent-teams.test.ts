@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { makeMockApi, makeCtx, makeUI } from "./__tests__/test-utils.js";
 
 // Mock parseFrontmatter (same as agent-loader test).
-vi.mock("@mariozechner/pi-coding-agent", () => ({
+vi.mock("@earendil-works/pi-coding-agent", () => ({
   parseFrontmatter: <T extends Record<string, unknown>>(
     content: string,
   ): { frontmatter: T; body: string } => {

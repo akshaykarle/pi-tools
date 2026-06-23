@@ -39,7 +39,7 @@ vi.mock("@anthropic-ai/sandbox-runtime", () => ({
   },
 }));
 
-vi.mock("@mariozechner/pi-coding-agent", () => ({
+vi.mock("@earendil-works/pi-coding-agent", () => ({
   getAgentDir: () => process.env.__TEST_AGENT_DIR__ ?? "/tmp/test-agent-dir",
   isToolCallEventType: (toolName: string, event: { toolName?: string }) =>
     event.toolName === toolName,
