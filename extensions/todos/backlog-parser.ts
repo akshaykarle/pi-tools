@@ -201,6 +201,10 @@ export function mapStatusToTaskStatus(status: BacklogSpec["status"]): TaskStatus
       return "done";
     case "cancelled":
       return "failed";
+    default:
+      // Exhaustive switch - TypeScript should never reach here
+      const _exhaustive: never = status;
+      return _exhaustive;
   }
 }
 
